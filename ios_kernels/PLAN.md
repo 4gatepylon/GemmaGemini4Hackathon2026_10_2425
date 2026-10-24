@@ -178,8 +178,8 @@ ios_kernels/
     kernels.metal         <- all Metal kernels (compiled at runtime)
     main.swift            <- engine: load, encode forward pass, generate, bench
     reference.py          <- HF transformers reference / correctness check
-    run.py                <- tokenize -> Swift engine -> detokenize
-    bench.sh              <- runs ours, llama.cpp, MLX; prints a table
+    build.sh              <- swiftc build (-> forward/.build/llm)
+    bench.sh              <- runs ours, llama.cpp, MLX
     setup.sh              <- clones/builds llama.cpp, converts weights (into .context/)
 ```
 
@@ -192,15 +192,29 @@ ios_kernels/
 - [x] Convert Llama-3.2-1B -> F16 GGUF for llama.cpp
 - [x] `convert_weights.py`: safetensors -> our flat fp16 format (fused QKV), max|w| checked against fp16 range
 - [x] Metal kernels (first draft): embed, rmsnorm, matvec(+residual), fused gate/up SwiGLU, rope+KV write, attention, argmax
-- [ ] Swift host: mmap weights, pipelines, encode one token per command buffer, pipelined greedy loop
-- [ ] `run.py` (tokenize/detokenize) + `reference.py` (HF logits / greedy tokens)
-- [ ] Correctness vs HF transformers (logits close, greedy tokens match)
-- [ ] Benchmark decode vs llama.cpp `tg128` (+ MLX)
-- [ ] Quick tuning sweep of matvec tunables; re-bench
-- [ ] Prefill GEMM (`simdgroup_matrix`) + benchmark vs `pp512`
-- [ ] `setup.sh` / `bench.sh` for one-command reproduction
-- [ ] Write results + reproduction steps in README.md
+- [x] Swift host: mmap weights, pipelines, encode one token per command buffer, pipelined greedy loop
+- [x] `reference.py` (HF logits / greedy tokens). `run.py` (text in/out) dropped for now: reference.py covers tokenization
+- [x] Correctness vs HF transformers: logits max|diff| 0.011, top-5 identical, 32/32 greedy tokens match (decode and GEMM prefill paths)
+- [x] Benchmark decode vs llama.cpp `tg128` (+ MLX): **52.1 vs 49.5–52.2 tok/s (parity)**
+- [x] Quick tuning sweep of matvec tunables: all configs land at 52–53 tok/s, so we're at the bandwidth wall for FP16
+- [x] Prefill GEMM (`simdgroup_matrix`) + benchmark vs `pp512`: **2050 vs 2650 tok/s (77% of llama.cpp)**
+- [x] `setup.sh` / `bench.sh` / `build.sh` for one-command reproduction
+- [x] Write results + reproduction steps in README.md
+- [ ] (next) Prefill: flash-attention style kernel (GQA-shared K/V tiles), GEMM double-buffering / larger tiles
 - [ ] (next) Q8_0 weights + kernel, benchmark vs llama.cpp Q8_0
+
+## Status (2026-10-24)
+
+MVP done. On Llama-3.2-1B FP16, M3 Pro:
+
+| engine | pp512 tok/s | tg128 tok/s |
+|---|---:|---:|
+| ours | ~2050 | ~52.1 |
+| llama.cpp d327bf1 | ~2650 | 49.5–52.2 |
+| MLX 0.29 | ~2400 | ~51.5 |
+
+Details are in README.md. Prefill gap breakdown: ~35 ms of 250 ms is naive
+attention, the rest is GEMM (~4.6 TFLOP/s).
 
 ## Roadblocks / risks (I'll update this as I go)
 
