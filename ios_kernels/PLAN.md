@@ -199,7 +199,7 @@ ios_kernels/
   kernels/                    <- one folder per model (HF repo id, `/` -> `__`), then one immutable folder per engine version; newest = default
     README.md                 <- folder contract + version table
     unsloth__Llama-3.2-1B-Instruct/
-      kernel_metal_llama_f16_20261024-1620/
+      kernel_metal_f16_20261024-1620/
         kernel.json           <- manifest: hf_repo, weights file, build, binary, convert
         convert_weights.py    <- safetensors -> flat fp16 .bin + JSON header
         kernels.metal         <- all Metal kernels (compiled at runtime)
