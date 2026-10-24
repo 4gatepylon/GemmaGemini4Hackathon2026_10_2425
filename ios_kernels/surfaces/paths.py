@@ -5,7 +5,8 @@ from pathlib import Path
 
 IOS_KERNELS = Path(__file__).resolve().parents[1]          # .../ios_kernels
 REPO_ROOT = IOS_KERNELS.parent
-KERNELS_DIR = IOS_KERNELS / "kernels"
+# kernels/<model id>/kernel_*; only this model is used for now.
+KERNELS_DIR = IOS_KERNELS / "kernels" / "unsloth__Llama-3.2-1B-Instruct"
 # Large artifacts (weights, llama.cpp checkout). Gitignored; override with $DATA_DIR.
 DATA_DIR = Path(os.environ.get("DATA_DIR", REPO_ROOT / ".context"))
 MODELS_DIR = DATA_DIR / "models"

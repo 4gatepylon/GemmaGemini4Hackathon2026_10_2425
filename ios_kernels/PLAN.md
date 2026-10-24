@@ -178,7 +178,7 @@ Likely optimization roadmap after the MVP, roughly in order of expected payoff:
 - `simdgroup_matrix` GEMM tuning for prefill; speculative decoding (batched verify).
 - Port to Gemma 3 1B / 270M; build an iOS app target.
 
-**How a new version plugs in:** copy the newest `kernels/kernel_*` folder under a
+**How a new version plugs in:** copy the newest `kernels/unsloth__Llama-3.2-1B-Instruct/kernel_*` folder under a
 new `_YYYYMMDD-HHMM` name and change it. As long as it keeps the folder contract
 (`kernel.json` manifest, build script, weight converter, and a binary with the
 `--serve` protocol + benchmark flags), it automatically becomes the default for
@@ -196,14 +196,15 @@ ios_kernels/
   PLAN.md                     <- this file
   README.md                   <- layout, quickstart, results
   pyproject.toml, uv.lock     <- uv project (surfaces + benchmarking deps)
-  kernels/                    <- one immutable folder per engine version; newest = default
+  kernels/                    <- one folder per model (HF repo id, `/` -> `__`), then one immutable folder per engine version; newest = default
     README.md                 <- folder contract + version table
-    kernel_metal_llama_f16_20261024-1620/
-      kernel.json             <- manifest: hf_repo, weights file, build, binary, convert
-      convert_weights.py      <- safetensors -> flat fp16 .bin + JSON header
-      kernels.metal           <- all Metal kernels (compiled at runtime)
-      main.swift              <- engine: load, forward pass, generate, bench, --serve
-      build.sh                <- swiftc build (-> .build/llm, gitignored)
+    unsloth__Llama-3.2-1B-Instruct/
+      kernel_metal_llama_f16_20261024-1620/
+        kernel.json           <- manifest: hf_repo, weights file, build, binary, convert
+        convert_weights.py    <- safetensors -> flat fp16 .bin + JSON header
+        kernels.metal         <- all Metal kernels (compiled at runtime)
+        main.swift            <- engine: load, forward pass, generate, bench, --serve
+        build.sh              <- swiftc build (-> .build/llm, gitignored)
   benchmarking/
     common.sh                 <- kernel selection (arg / $KERNEL / newest) + paths
     setup.sh                  <- builds llama.cpp, converts weights (into .context/), builds kernel

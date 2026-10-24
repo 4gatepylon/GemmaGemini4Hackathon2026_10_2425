@@ -6,8 +6,9 @@ This is a sub-project of the broader effort. The goal is to make a more performa
 ```
 ios_kernels/                 a uv project (pyproject.toml): `uv sync` once
   PLAN.md                    design, decisions, roadmap, checklist
-  kernels/                   one immutable folder per engine version; newest is the default
-    kernel_metal_llama_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
+  kernels/                   one folder per model, then one immutable folder per engine version; newest is the default
+    unsloth__Llama-3.2-1B-Instruct/
+      kernel_metal_llama_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
   benchmarking/              setup.sh (llama.cpp + weights), bench.sh, reference.py (correctness)
   surfaces/                  try it by hand: OpenAI-compatible server + CLI chat (Python)
     DESIGN_AND_LIMITATIONS.md   how surfaces, runners and kernels plug together, and what they don't do

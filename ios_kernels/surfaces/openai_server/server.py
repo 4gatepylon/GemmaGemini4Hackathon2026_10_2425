@@ -1,6 +1,6 @@
 """Minimal OpenAI-compatible chat server over any Runner.
 
-    uv run openai-server                      # newest kernel in ios_kernels/kernels/
+    uv run openai-server                      # newest kernel in ios_kernels/kernels/unsloth__Llama-3.2-1B-Instruct/
     uv run openai-server --kernel <name>      # a specific kernel folder
     uv run openai-server --runner fake        # canned echo replies, no GPU
     uv run openai-server --runner mlx         # mlx-lm reference backend
@@ -153,7 +153,7 @@ def _chain(first: Chunk, rest: Iterator[Chunk]) -> Iterator[Chunk]:
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--runner", default="kernel", choices=sorted(RUNNERS))
-    ap.add_argument("--kernel", help="[kernel] folder name/substring/path under kernels/ (default: newest)")
+    ap.add_argument("--kernel", help="[kernel] folder name/substring/path under kernels/<model>/ (default: newest)")
     ap.add_argument("--weights", help="[kernel] weights file (default: from the kernel's kernel.json)")
     ap.add_argument("--max-ctx", type=int, default=4096, help="[kernel] KV cache length")
     ap.add_argument("--mlx-model", help="[mlx] model path or HF repo (default: .context/models/llama1b_mlx_f16)")

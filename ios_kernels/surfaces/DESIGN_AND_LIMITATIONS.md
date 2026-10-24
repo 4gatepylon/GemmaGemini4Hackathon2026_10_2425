@@ -21,7 +21,7 @@ being able to swap kernels or runtimes over throughput or features.
            └──────────┬───────────┴────────────────┴────────────────┘
                       │  JSON lines over stdin/stdout ("--serve protocol")
                       ▼
- kernels/kernel_<name>_<YYYYMMDD-HHMM>/.build/llm   (Swift + Metal, token ids only)
+ kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/.build/llm   (Swift + Metal, token ids only)
 ```
 
 There are two seams. They are the only places that need to stay stable:
@@ -54,7 +54,7 @@ There are two seams. They are the only places that need to stay stable:
 ## How to swap things
 
 ### A new kernel version (most common)
-1. Copy the newest folder to `kernels/kernel_<name>_<YYYYMMDD-HHMM>/` and change it.
+1. Copy the newest folder to `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/` and change it.
 2. Keep the contract (below). If the weight format changes, point `kernel.json`
    `weights` at a new file name and update its `convert_weights.py`.
 3. `benchmarking/setup.sh` converts the weights and builds the binary.

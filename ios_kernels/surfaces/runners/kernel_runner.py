@@ -1,4 +1,4 @@
-"""Runner for our hand-written kernels (any folder under ios_kernels/kernels/).
+"""Runner for our hand-written kernels (any folder under ios_kernels/kernels/<model>/).
 
 Each kernel folder is self-describing via kernel.json:
     {"hf_repo": ..., "weights": <file in DATA_DIR/models>, "build": "build.sh", "binary": ".build/llm"}
