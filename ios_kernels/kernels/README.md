@@ -21,4 +21,4 @@ gitignored `.build/`.
 
 | folder | what | pp512 / tg128 (tok/s, M3 Pro) |
 |---|---|---|
-| `kernel_metal_llama_f16_20261024-1620` | first MVP: hand-written Metal + Swift, Llama-3.2-1B FP16 | ~2050 / ~52–53 (llama.cpp: ~2650 / ~50–52) |
+| `kernel_metal_f16_20261024-1620` | first MVP: hand-written Metal + Swift, Llama-3.2-1B FP16 | ~2050 / ~52–53 (llama.cpp: ~2650 / ~50–52) |

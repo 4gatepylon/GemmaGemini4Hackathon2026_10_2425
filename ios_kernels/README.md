@@ -8,7 +8,7 @@ ios_kernels/                 a uv project (pyproject.toml): `uv sync` once
   PLAN.md                    design, decisions, roadmap, checklist
   kernels/                   one folder per model, then one immutable folder per engine version; newest is the default
     unsloth__Llama-3.2-1B-Instruct/
-      kernel_metal_llama_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
+      kernel_metal_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
   benchmarking/              setup.sh (llama.cpp + weights), bench.sh, reference.py (correctness)
   surfaces/                  try it by hand: OpenAI-compatible server + CLI chat (Python)
     DESIGN_AND_LIMITATIONS.md   how surfaces, runners and kernels plug together, and what they don't do
@@ -34,7 +34,7 @@ uv run --extra bench python benchmarking/reference.py   # correctness vs HF tran
 
 | engine | pp512 (tok/s) | tg128 (tok/s) |
 |---|---:|---:|
-| **ours** (`kernel_metal_llama_f16_20261024-1620`) | 2044–2062 | **52.1–53.4** |
+| **ours** (`kernel_metal_f16_20261024-1620`) | 2044–2062 | **52.1–53.4** |
 | llama.cpp `d327bf1` (Metal, `llama-bench -ngl 99`) | **2639–2655** | 49.5–52.2 |
 | MLX / mlx-lm (`mlx_lm benchmark`) | 2365–2471 | 51.0–52.0* |
 
