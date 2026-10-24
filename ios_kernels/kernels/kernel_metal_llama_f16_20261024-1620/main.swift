@@ -4,6 +4,16 @@
 // Usage:
 //   llm --weights W.bin --prompt-ids 128000,9906 --gen 32      greedy generation, prints ids as JSON
 //   llm --weights W.bin --bench-tg 128 --bench-pp 512 --reps 5 llama-bench style throughput
+//   llm --weights W.bin --serve                                stay resident, JSON lines on stdin/stdout
+//
+// --serve protocol (one JSON object per line; see ios_kernels/surfaces/README.md):
+//   out (once): {"ready": true, "max_ctx": N, "vocab": V, "device": "..."}
+//   in:         {"ids": [int], "max_tokens": N, "stop_ids": [int]}
+//   out:        {"token": id}   for every generated token, as soon as it's ready (stop token not sent)
+//   out:        {"done": true, "finish_reason": "stop"|"length", "prompt_tokens": P,
+//                "completion_tokens": n, "prefill_s": s, "decode_s": s}
+//   out:        {"error": "..."} for a bad request (the server keeps running)
+//   EOF on stdin exits.
 // Options:
 //   --kernels PATH        kernels.metal (default: next to this source file)
 //   --define NAME=VALUE   extra #define for the kernels (repeatable), e.g. MV_NR=8
@@ -29,6 +39,7 @@ struct Options {
     var reps = 5
     var dumpLogits: String?
     var useGemm = true
+    var serve = false
 }
 
 func parseOptions() -> Options {
@@ -51,6 +62,7 @@ func parseOptions() -> Options {
         case "--reps": o.reps = Int(next(a))!
         case "--dump-logits": o.dumpLogits = next(a)
         case "--no-gemm": o.useGemm = false
+        case "--serve": o.serve = true
         default: fatalError("unknown argument \(a)")
         }
     }
@@ -458,6 +470,81 @@ final class Engine {
     }
 }
 
+extension Engine {
+    /// Greedy decode with at most `window` command buffers in flight. `emit` gets each
+    /// token as soon as its step completes; returning false stops generation (the
+    /// already-queued steps are drained and discarded).
+    func decodeStreaming(from pos: Int, count: Int, window: Int = 3, emit: (Int32) -> Bool) {
+        var inflight: [(cb: MTLCommandBuffer, pos: Int)] = []
+        var queued = 0
+        var stopped = false
+        while !inflight.isEmpty || (!stopped && queued < count) {
+            while !stopped && queued < count && inflight.count < window {
+                let p = pos + queued
+                inflight.append((run { self.encodeDecode($0, pos: p, sample: true) }, p))
+                queued += 1
+            }
+            let step = inflight.removeFirst()
+            step.cb.waitUntilCompleted()
+            if !stopped && !emit(token(at: step.pos + 1)) { stopped = true }
+        }
+    }
+}
+
+// MARK: - serve mode
+
+func writeLine(_ obj: [String: Any]) {
+    var data = try! JSONSerialization.data(withJSONObject: obj)
+    data.append(0x0A)
+    FileHandle.standardOutput.write(data)
+}
+
+func serve(_ engine: Engine, useGemm: Bool) {
+    let cfg = engine.cfg
+    // Warm up both paths (first dispatches pay one-time driver/pipeline costs).
+    engine.setTokens([128000, 128000])
+    engine.prefill(n: 2, useGemm: useGemm)
+    engine.decode(from: 2, count: 2)
+    writeLine(["ready": true, "max_ctx": engine.maxCtx, "vocab": cfg.vocab, "device": engine.device.name])
+    while let line = readLine() {
+        guard let data = line.data(using: .utf8),
+              let req = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let ids = (req["ids"] as? [Int])?.map(Int32.init), !ids.isEmpty else {
+            writeLine(["error": "expected {\"ids\": [int, ...], \"max_tokens\": int}"])
+            continue
+        }
+        if let bad = ids.first(where: { $0 < 0 || Int($0) >= cfg.vocab }) {
+            writeLine(["error": "token id \(bad) out of range"]); continue
+        }
+        if ids.count >= engine.maxCtx {
+            writeLine(["error": "prompt has \(ids.count) tokens, max_ctx is \(engine.maxCtx)"]); continue
+        }
+        let maxTokens = min(req["max_tokens"] as? Int ?? 256, engine.maxCtx - ids.count)
+        let stopIds = Set((req["stop_ids"] as? [Int] ?? []).map(Int32.init))
+
+        var produced = 0
+        var finish = "length"
+        func emit(_ t: Int32) -> Bool {
+            if stopIds.contains(t) { finish = "stop"; return false }
+            writeLine(["token": Int(t)])
+            produced += 1
+            return produced < maxTokens
+        }
+
+        engine.setTokens(ids)
+        let t0 = Date()
+        engine.prefill(n: ids.count, useGemm: useGemm)  // also samples the first token
+        let tPrefill = Date().timeIntervalSince(t0)
+        let t1 = Date()
+        if maxTokens > 0 && emit(engine.token(at: ids.count)) && maxTokens > 1 {
+            engine.decodeStreaming(from: ids.count, count: maxTokens - 1, emit: emit)
+        }
+        writeLine(["done": true, "finish_reason": finish, "prompt_tokens": ids.count,
+                   "completion_tokens": produced, "prefill_s": tPrefill,
+                   "decode_s": Date().timeIntervalSince(t1)])
+    }
+}
+
 // MARK: - main
 
 func stats(_ xs: [Double]) -> (Double, Double) {
@@ -469,7 +556,7 @@ func stats(_ xs: [Double]) -> (Double, Double) {
 let opts = parseOptions()
 guard let device = MTLCreateSystemDefaultDevice() else { fatalError("no Metal device") }
 let model = ModelFile(path: opts.weights, device: device)
-let maxBatch = max(64, min(opts.benchPP, 512), min(opts.promptIds.count, 512))
+let maxBatch = opts.serve ? 512 : max(64, min(opts.benchPP, 512), min(opts.promptIds.count, 512))
 let engine = Engine(model: model, kernelsPath: opts.kernels, defines: opts.defines,
                     maxCtx: opts.maxCtx, maxBatch: maxBatch)
 let cfg = model.config
@@ -531,3 +618,5 @@ if opts.benchPP > 0 || opts.benchTG > 0 {
     }
     print(String(data: try! JSONSerialization.data(withJSONObject: report), encoding: .utf8)!)
 }
+
+if opts.serve { serve(engine, useGemm: opts.useGemm) }
