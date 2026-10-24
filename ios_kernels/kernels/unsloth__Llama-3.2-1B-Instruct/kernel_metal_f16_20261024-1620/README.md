@@ -1,4 +1,4 @@
-# kernel_metal_llama_f16_20261024-1620
+# kernel_metal_f16_20261024-1620
 
 The first MVP: a from-scratch Llama-3.2-1B forward pass with hand-written Metal compute
 kernels, a Swift host (no ML framework, so it ports to iOS), and FP16 weights. Design
