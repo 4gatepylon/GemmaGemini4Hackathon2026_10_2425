@@ -1,5 +1,10 @@
 # Kernels
 
+Kernels are grouped by model: `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/`, where
+`<model>` is the HF repo id with `/` replaced by `__` (e.g. `unsloth__Llama-3.2-1B-Instruct`).
+For now only `unsloth__Llama-3.2-1B-Instruct` is used (hard-coded in `surfaces/paths.py`
+and `benchmarking/common.sh`).
+
 Each folder `kernel_<name>_<YYYYMMDD-HHMM>/` is a self-contained, **immutable snapshot**
 of one inference engine version (kernels, host code, weight converter, build script).
 To iterate, copy the newest folder under a new timestamp and change the copy. Old
