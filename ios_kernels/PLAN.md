@@ -12,9 +12,15 @@ structured with that in mind (see "Structured for iteration" below).
 Machine: Apple M3 Pro (18-core GPU, ~150 GB/s memory bandwidth), 36 GB,
 macOS 15 (Darwin 24.6), Xcode 26.3, Swift 6.2.
 
-All of our code lives in `ios_kernels/`. Large artifacts (weights, GGUFs,
-llama.cpp checkout and build) live in the gitignored `.context/` directory
-and are never committed.
+All of our code lives in `ios_kernels/`, which is a uv Python project. Large
+artifacts (weights, GGUFs, llama.cpp checkout and build) live in the gitignored
+`.context/` directory and are never committed.
+
+**Milestone 2 (done): manual-testing surfaces.** An OpenAI-compatible FastAPI
+server and a terminal chat client sit on a pluggable `Runner` interface, so new
+kernel versions and other runtimes (MLX, ...) drop in without touching the
+server. The design and limitations are in
+[`surfaces/DESIGN_AND_LIMITATIONS.md`](surfaces/DESIGN_AND_LIMITATIONS.md).
 
 ---
 
@@ -38,8 +44,12 @@ and are never committed.
 Already on this machine (nothing new installed system-wide):
 - Xcode 26.3 / Swift 6.2 / Metal.framework (runtime shader compiler)
 - cmake (Homebrew), used only to build llama.cpp
-- Python 3.13 (miniconda) with `torch`, `safetensors`, `numpy`, `transformers`,
-  `tokenizers`, `huggingface_hub`, `gguf`, `mlx`, `mlx-lm`
+- uv 0.12. Python deps are pinned in `ios_kernels/pyproject.toml` + `uv.lock`:
+  - default: `fastapi`, `uvicorn`, `transformers` + `jinja2` (tokenizer/chat
+    template only, no torch), `openai` (CLI client). Dev group: `pytest`, `httpx`
+  - extra `bench`: `torch`, `safetensors`, `numpy`, `gguf`, `sentencepiece`,
+    `mlx-lm` (weight conversion, HF reference, MLX baseline)
+  - extra `mlx`: `mlx-lm` (the server's `--runner mlx`)
 - HF cache: `unsloth/Llama-3.2-1B-Instruct` `model.safetensors` + tokenizer
 
 Downloaded for this task:
@@ -50,8 +60,11 @@ Downloaded for this task:
   `cmake -B build -DGGML_METAL=ON -DLLAMA_CURL=OFF && cmake --build build --target llama-bench llama-cli`
 
 Generated artifacts (in `.context/models/`, ~2.5 GB each):
-- `llama1b_f16.bin` (our format, from `ios_kernels/forward/convert_weights.py`)
+- `llama1b_f16.bin` (our format, from the kernel folder's `convert_weights.py`)
 - `llama1b_f16.gguf` (llama.cpp format, from `convert_hf_to_gguf.py --outtype f16`)
+- `llama1b_mlx_f16/` (MLX format, from `mlx_lm convert --dtype float16`)
+
+All of these are produced by `ios_kernels/benchmarking/setup.sh`.
 
 Optional downloads that would help (not blocking, tell me if you want them):
 - **Metal Toolchain** (`xcodebuild -downloadComponent MetalToolchain`, about 1 GB):
@@ -165,22 +178,45 @@ Likely optimization roadmap after the MVP, roughly in order of expected payoff:
 - `simdgroup_matrix` GEMM tuning for prefill; speculative decoding (batched verify).
 - Port to Gemma 3 1B / 270M; build an iOS app target.
 
+**How a new version plugs in:** copy the newest `kernels/kernel_*` folder under a
+new `_YYYYMMDD-HHMM` name and change it. As long as it keeps the folder contract
+(`kernel.json` manifest, build script, weight converter, and a binary with the
+`--serve` protocol + benchmark flags), it automatically becomes the default for
+the server, `bench.sh`, `reference.py` and the e2e tests, and old versions stay
+runnable for A/B comparisons. A different *runtime* (MLX, Core ML, ...) plugs in
+one level up as a `Runner` class. Details:
+[`surfaces/DESIGN_AND_LIMITATIONS.md`](surfaces/DESIGN_AND_LIMITATIONS.md#how-to-swap-things).
+
 ---
 
 ## Layout
 
 ```
 ios_kernels/
-  PLAN.md                 <- this file
-  README.md               <- results + how to run
-  forward/
-    convert_weights.py    <- safetensors -> flat fp16 .bin + JSON header
-    kernels.metal         <- all Metal kernels (compiled at runtime)
-    main.swift            <- engine: load, encode forward pass, generate, bench
-    reference.py          <- HF transformers reference / correctness check
-    build.sh              <- swiftc build (-> forward/.build/llm)
-    bench.sh              <- runs ours, llama.cpp, MLX
-    setup.sh              <- clones/builds llama.cpp, converts weights (into .context/)
+  PLAN.md                     <- this file
+  README.md                   <- layout, quickstart, results
+  pyproject.toml, uv.lock     <- uv project (surfaces + benchmarking deps)
+  kernels/                    <- one immutable folder per engine version; newest = default
+    README.md                 <- folder contract + version table
+    kernel_metal_llama_f16_20261024-1620/
+      kernel.json             <- manifest: hf_repo, weights file, build, binary, convert
+      convert_weights.py      <- safetensors -> flat fp16 .bin + JSON header
+      kernels.metal           <- all Metal kernels (compiled at runtime)
+      main.swift              <- engine: load, forward pass, generate, bench, --serve
+      build.sh                <- swiftc build (-> .build/llm, gitignored)
+  benchmarking/
+    common.sh                 <- kernel selection (arg / $KERNEL / newest) + paths
+    setup.sh                  <- builds llama.cpp, converts weights (into .context/), builds kernel
+    bench.sh                  <- ours vs llama.cpp vs MLX
+    reference.py              <- HF transformers correctness check
+  surfaces/
+    DESIGN_AND_LIMITATIONS.md <- architecture, protocol spec, how to swap kernels/runtimes, limitations
+    README.md                 <- usage
+    paths.py                  <- layout + newest-kernel discovery
+    runners/                  <- Runner interface + kernel / mlx / fake runners
+    openai_server/server.py   <- FastAPI OpenAI-compatible server (`uv run openai-server`)
+    cli_client/chat.py        <- terminal chat (`uv run cli-chat`)
+    tests/                    <- pytest: API/CLI (fake runner) + e2e (real kernel, MLX)
 ```
 
 ---
@@ -200,6 +236,14 @@ ios_kernels/
 - [x] Prefill GEMM (`simdgroup_matrix`) + benchmark vs `pp512`: **2050 vs 2650 tok/s (77% of llama.cpp)**
 - [x] `setup.sh` / `bench.sh` / `build.sh` for one-command reproduction
 - [x] Write results + reproduction steps in README.md
+- [x] Milestone 2: restructure into `kernels/` (versioned folders + `kernel.json`), `benchmarking/`, `surfaces/`. Make `ios_kernels/` a uv project
+- [x] Kernel `--serve` mode: resident process, JSON-lines protocol, streaming, stop ids, warmup, exits on stdin EOF
+- [x] `Runner` interface + registry: `KernelRunner` (newest kernel by default), `MLXRunner`, `FakeRunner` (deterministic echo)
+- [x] OpenAI-compatible FastAPI server (`/v1/models`, `/v1/chat/completions` stream + non-stream, usage, 400s)
+- [x] CLI chat client (`openai` SDK; REPL + one-shot; ttft and tok/s). Works against llama.cpp's `llama-server` too
+- [x] Tests: 24 pass (14 fake-runner API/CLI tests, 8 real-kernel e2e, 2 MLX e2e). Kernel and MLX greedy output == HF transformers text
+- [x] Fixed: a client disconnecting mid-stream left the runner locked (Starlette doesn't close sync generators). Regression tests added
+- [ ] (next) Protocol `cancel` message so abandoned streams stop immediately (they currently finish in the background)
 - [ ] (next) Prefill: flash-attention style kernel (GQA-shared K/V tiles), GEMM double-buffering / larger tiles
 - [ ] (next) Q8_0 weights + kernel, benchmark vs llama.cpp Q8_0
 
@@ -216,10 +260,14 @@ MVP done. On Llama-3.2-1B FP16, M3 Pro:
 Details are in README.md. Prefill gap breakdown: ~35 ms of 250 ms is naive
 attention, the rest is GEMM (~4.6 TFLOP/s).
 
+Manual testing: `uv run openai-server` + `uv run cli-chat` (about 48 tok/s
+streamed over HTTP, ~50 ms time-to-first-token).
+
 ## Roadblocks / risks (I'll update this as I go)
 
 - **No offline Metal compiler.** Worked around with runtime compilation. Not blocking.
 - **No ready-made Llama GGUF locally.** Converted it ourselves with llama.cpp's script. Resolved.
 - **unsloth snapshot was missing `config.json`.** Fetched from the public HF repo. Resolved.
 - BF16 -> FP16 overflow: checked during conversion, no tensor exceeds the fp16 range. Resolved.
+- transformers 5 changed `apply_chat_template` to return a dict, which broke `reference.py`. Fixed by sharing `surfaces/runners/hf_chat.ChatTokenizer` (render, then encode). Resolved.
 - Nothing is currently blocking.

@@ -1,0 +1,8 @@
+{
+  "description": "Hand-written Metal kernels + Swift host, Llama-3.2-1B, FP16 weights, greedy decoding",
+  "hf_repo": "unsloth/Llama-3.2-1B-Instruct",
+  "weights": "llama1b_f16.bin",
+  "build": "build.sh",
+  "binary": ".build/llm",
+  "convert": "convert_weights.py"
+}
