@@ -57,15 +57,15 @@ There are two seams. They are the only places that need to stay stable:
 1. Copy the newest folder to `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/` and change it.
 2. Keep the contract (below). If the weight format changes, point `kernel.json`
    `weights` at a new file name and update its `convert_weights.py`.
-3. `benchmarking/setup.sh` converts the weights and builds the binary.
+3. `uv run --extra bench benchmarking/setup.py --kernel <name>` converts the weights and builds the binary.
    `uv run openai-server` now uses it automatically (newest). Select an older one
    with `--kernel <substring>`.
 4. Check it: `uv run pytest` (the e2e tests run against the newest kernel),
-   `benchmarking/reference.py`, `benchmarking/bench.sh`.
+   `benchmarking/reference.py`, `benchmarking/bench.py`.
 
 **Kernel folder contract:**
 - `kernel.json`: `{"hf_repo", "weights" (file name in $DATA_DIR/models), "build", "binary", "convert"}`
-- `build` script: produces `binary`. `KernelRunner` rebuilds when `*.swift` is newer than the binary.
+- `build` script: an executable Python script (shebang, `chmod +x`) that produces `binary`. `KernelRunner` rebuilds when `*.swift` is newer than the binary.
 - `convert` script: `--repo <hf_repo> --out <weights path>`
 - `binary` accepts `--weights PATH --serve --max-ctx N` and speaks the protocol below.
   For `benchmarking/` it also needs `--bench-pp N --bench-tg N --reps R` and
@@ -118,7 +118,7 @@ Ollama, mlx-lm's server), there's nothing to write: `uv run cli-chat --base-url 
   manifest. The surfaces themselves are model-agnostic.
 - **Localhost only, no auth** (binds `127.0.0.1` by default, API key ignored). Don't expose it.
 - **End-to-end HTTP streaming is about 48 tok/s vs 52–53 raw**, because of per-token Python
-  detokenization and JSON/SSE overhead. Fine for humans, so use `benchmarking/bench.sh` for
+  detokenization and JSON/SSE overhead. Fine for humans, so use `benchmarking/bench.py` for
   performance numbers, never the server.
 - **macOS + Apple GPU only** for the kernel runner. The fake runner and API tests run anywhere.
 

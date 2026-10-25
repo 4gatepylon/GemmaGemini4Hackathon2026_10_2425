@@ -1,5 +1,5 @@
 """End-to-end: the real Metal kernel behind the real server. Skipped if the weights aren't set up
-(run ios_kernels/benchmarking/setup.sh). Expected texts come from HF transformers greedy output."""
+(run ios_kernels/benchmarking/setup.py). Expected texts come from HF transformers greedy output."""
 
 import json
 import platform

@@ -4,7 +4,7 @@ An OpenAI-compatible server plus a terminal chat client on top of our kernels (o
 other backend). The design, extension points and limitations are in
 [DESIGN_AND_LIMITATIONS.md](DESIGN_AND_LIMITATIONS.md).
 
-All commands run from `ios_kernels/` (a uv project). Run `benchmarking/setup.sh` once first,
+All commands run from `ios_kernels/` (a uv project). Run `uv run --extra bench benchmarking/setup.py` once first,
 to get the weights.
 
 ```sh

@@ -1,6 +1,6 @@
 // Minimal Llama-style inference engine on hand-written Metal kernels.
 //
-// Build:  swiftc -O -o .build/llm main.swift   (see build.sh)
+// Build:  swiftc -O -o .build/llm main.swift   (see build.py)
 // Usage:
 //   llm --weights W.bin --prompt-ids 128000,9906 --gen 32      greedy generation, prints ids as JSON
 //   llm --weights W.bin --bench-tg 128 --bench-pp 512 --reps 5 llama-bench style throughput

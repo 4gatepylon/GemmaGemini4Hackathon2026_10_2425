@@ -1,5 +1,6 @@
 """Filesystem layout shared by the surfaces, runners, and benchmarking scripts."""
 
+import json
 import os
 from pathlib import Path
 
@@ -10,6 +11,7 @@ KERNELS_DIR = IOS_KERNELS / "kernels" / "unsloth__Llama-3.2-1B-Instruct"
 # Large artifacts (weights, llama.cpp checkout). Gitignored; override with $DATA_DIR.
 DATA_DIR = Path(os.environ.get("DATA_DIR", REPO_ROOT / ".context"))
 MODELS_DIR = DATA_DIR / "models"
+LLAMA_DIR = DATA_DIR / "deps" / "llama.cpp"  # llama.cpp checkout + build (benchmark baseline)
 
 
 def list_kernels() -> list[Path]:
@@ -31,3 +33,8 @@ def resolve_kernel(name: str | None = None) -> Path:
     if len(matches) != 1:
         raise ValueError(f"kernel {name!r} matched {[m.name for m in matches]}; available: {[k.name for k in kernels]}")
     return matches[0]
+
+
+def load_manifest(kernel: Path) -> dict:
+    """A kernel folder's kernel.json."""
+    return json.loads((kernel / "kernel.json").read_text())
