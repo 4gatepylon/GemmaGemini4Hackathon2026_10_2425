@@ -38,7 +38,8 @@ def main() -> None:
     repo = manifest["hf_repo"]
     snap = snapshot_download(repo, allow_patterns=["*.json", "*.safetensors"])
 
-    weights, gguf, mlx = MODELS_DIR / manifest["weights"], MODELS_DIR / "llama1b_f16.gguf", MODELS_DIR / "llama1b_mlx_f16"
+    weights = MODELS_DIR / manifest["weights"]
+    gguf, mlx = MODELS_DIR / "llama1b_f16.gguf", MODELS_DIR / "llama1b_mlx_f16"
     if not weights.exists():
         run(sys.executable, kernel / manifest["convert"], "--repo", repo, "--out", weights)
     if not gguf.exists():

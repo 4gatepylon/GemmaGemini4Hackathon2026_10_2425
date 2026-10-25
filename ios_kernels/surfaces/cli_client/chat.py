@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> None:
     history = list(system)
 
     if args.prompt is not None:
-        reply(client, model, history + [{"role": "user", "content": args.prompt}], args.max_tokens)
+        reply(client, model, [*history, {"role": "user", "content": args.prompt}], args.max_tokens)
         return
 
     print(f"model: {model} @ {args.base_url}   (/reset, /exit)")

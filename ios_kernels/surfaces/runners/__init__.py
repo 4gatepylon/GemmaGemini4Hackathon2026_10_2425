@@ -19,4 +19,4 @@ def make_runner(name: str, **kwargs) -> Runner:
     return getattr(importlib.import_module(module), cls)(**kwargs)
 
 
-__all__ = ["Chunk", "Message", "Runner", "RUNNERS", "make_runner"]
+__all__ = ["RUNNERS", "Chunk", "Message", "Runner", "make_runner"]

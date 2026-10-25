@@ -72,6 +72,7 @@ New utility scripts go here.
 ## Checks
 
 From `ios_kernels/`:
+- `uv run ruff check .`: lint (config in `pyproject.toml`). Must be clean. `ruff format` is not used.
 - `uv run pytest`: unit tests always run. Kernel e2e tests need `.context/models/*.bin`
   (run `uv run --extra bench benchmarking/setup.py`) and compare exact greedy output against HF.
 - `uv run --extra bench python benchmarking/reference.py --kernel <name>`: logits/tokens vs HF.
