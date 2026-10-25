@@ -9,6 +9,7 @@ Large artifacts go to $DATA_DIR (default: <repo>/.context, gitignored).
 import argparse
 import subprocess
 import sys
+from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
@@ -52,7 +53,7 @@ def main() -> None:
         run(sys.executable, kernel / manifest["convert"], "--repo", repo, "--out", weights)
     if not gguf.exists():
         run(sys.executable, LLAMA_DIR / "convert_hf_to_gguf.py", snap, "--outtype", "f16", "--outfile", gguf)
-    if not mlx.is_dir():
+    if isinstance(mlx, Path) and not mlx.is_dir():
         run(sys.executable, "-m", "mlx_lm", "convert", "--hf-path", repo, "--mlx-path", mlx, "--dtype", "float16")
 
     run(kernel / manifest["build"])

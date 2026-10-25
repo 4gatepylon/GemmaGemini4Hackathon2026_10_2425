@@ -1,8 +1,10 @@
 """The mlx-lm runner gives the same greedy text (cross-checks the Runner seam with a second
-backend). Skipped unless `uv sync --extra mlx` was run and setup.py created the MLX model."""
+backend). Skipped unless `uv sync --extra mlx` was run and the MLX model is present (made by
+setup.py, or the HF snapshot in the HF cache for models without a converted copy)."""
 
 import importlib.util
 import threading
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,8 +14,18 @@ from surfaces.openai_server.server import create_app
 from surfaces.paths import baseline
 
 MLX_MODEL = baseline("mlx")
+
+
+def mlx_model_present() -> bool:
+    if isinstance(MLX_MODEL, Path):
+        return MLX_MODEL.exists()
+    from huggingface_hub import try_to_load_from_cache
+
+    return isinstance(try_to_load_from_cache(MLX_MODEL, "config.json"), str)
+
+
 pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("mlx_lm") is None or not MLX_MODEL.exists(), reason=f"needs the mlx extra and {MLX_MODEL}"
+    importlib.util.find_spec("mlx_lm") is None or not mlx_model_present(), reason=f"needs the mlx extra and {MLX_MODEL}"
 )
 
 from .test_kernel_e2e import SKY, SKY_REF  # noqa: E402

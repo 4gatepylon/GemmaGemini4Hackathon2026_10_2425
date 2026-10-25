@@ -50,7 +50,8 @@ class MLXRunner(Runner):
         def generate():
             from mlx_lm import stream_generate
 
-            prompt = self.tok.apply_chat_template(messages, add_generation_prompt=True)
+            # Thinking off, like the HF template our kernels use (mlx-lm turns it on where supported).
+            prompt = self.tok.apply_chat_template(messages, add_generation_prompt=True, enable_thinking=False)
             last = None
             for r in stream_generate(self.model, self.tok, prompt, max_tokens=max_tokens):
                 if cancelled.is_set():

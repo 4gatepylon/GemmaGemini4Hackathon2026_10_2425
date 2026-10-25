@@ -10,6 +10,8 @@ ios_kernels/                 a uv project (pyproject.toml)
   PLAN.md                    design, decisions, roadmap, checklist
   CLAUDE.md                  how to add a kernel (naming, lineage header), rules, checks
   kernels/                   one folder per model, then one immutable folder per engine version; newest is the default
+    google__gemma-4-E2B-it/            the default model (MODEL in surfaces/paths.py)
+      kernel_metal_f16_20261025-1225/   hand-written Metal + Swift, Gemma 4 E2B (text) FP16
     unsloth__Llama-3.2-1B-Instruct/
       kernel_metal_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
   benchmarking/              setup.py (llama.cpp + weights), bench.py, reference.py (correctness)
@@ -28,7 +30,7 @@ Needs macOS on Apple silicon, Xcode (Swift), cmake and [uv](https://docs.astral.
 ```sh
 cd ios_kernels                    # or run make -C ios_kernels <command> from the repo root
 make help                         # every command; `make help args=<command>` for its flags
-make setup                        # one-time: builds llama.cpp, converts weights (~7.5 GB), builds the kernel
+make setup                        # one-time: builds llama.cpp, converts weights (~19 GB), builds the kernel
 make serve                        # serves the newest kernel at http://127.0.0.1:8000/v1
 make chat                         # chat with it (in another terminal)
 make test                         # all tests (API/CLI + end-to-end kernel and MLX)
@@ -71,6 +73,24 @@ make serve-llamacpp                        # then: make chat args="--port 8080"
 make bench-ours args="--define MV_NR=2 --reps 3"
 make new-kernel args=metal_llama_q8        # start the next kernel version
 ```
+
+## Results: Gemma 4 E2B-it (text), FP16, Apple M3 Pro (18-core GPU, 36 GB)
+
+| engine | pp512 (tok/s) | tg128 (tok/s) |
+|---|---:|---:|
+| **ours** (`kernel_metal_f16_20261025-1225`) | 1122–1125 | **27.7–28.4** |
+| llama.cpp `6050b46` (Metal, `llama-bench -ngl 99`) | 1115–1127 | 25.2–26.3 |
+| MLX / mlx-lm (`mlx_lm benchmark`, HF bf16 weights) | **2581–2708** | 26.7* |
+
+Two separate runs of 5 reps each. \*MLX's generation number is measured after the 512-token
+prompt, the others from an empty cache.
+
+- **Decode**: ahead of llama.cpp and MLX. 28 tok/s × 4.56 GB/token ≈ 128 GB/s, about 85% of
+  the M3 Pro's ~150 GB/s (the per-layer-embedding table is only gathered, so it doesn't count).
+- **Prefill**: on par with llama.cpp, well behind MLX (see the kernel's `PLAN.md`).
+- **Correctness**: vs HF transformers fp32, last-token logits max |diff| 0.013 (logit
+  range ±30), same top-5, 32/32 greedy tokens identical. Also checked end to end through
+  the server (`surfaces/tests/test_kernel_e2e.py`), and mlx-lm gives the same text.
 
 ## Results: Llama-3.2-1B-Instruct, FP16, Apple M3 Pro (18-core GPU, 36 GB)
 

@@ -1,6 +1,6 @@
 # Surfaces: design and limitations
 
-> As of: main @ dd8c5c5, 2026-10-24 14:00 PDT
+> As of: main @ 028399a, 2026-10-25 13:25 PDT
 
 **Purpose:** let a human try out LLM generation from our kernels by hand: chat in a
 terminal, or point any OpenAI-compatible tool at a local endpoint. This is a *manual
@@ -117,10 +117,11 @@ starts llama.cpp's on port 8080).
   the protocol.
 - **Up to 2 wasted decode steps** after a stop token (the stream window). Invisible to clients.
 - **Tokenizer and chat template come from HF `transformers`** (the Llama-3.2 template injects
-  a "Cutting Knowledge Date / Today Date" system header). The first start downloads nothing
+  a "Cutting Knowledge Date / Today Date" system header; Gemma 4's thinking mode stays off, and
+  the MLX runner turns it off too so both backends see the same prompt). The first start downloads nothing
   if the HF cache is warm, otherwise it needs network access.
-- **Llama-3.2-1B-specific bits** live in the kernel (head_dim 64, Llama-3 RoPE) and the
-  manifest. The surfaces themselves are model-agnostic.
+- **Model-specific bits** live in the kernel (head dims, RoPE variant, Gemma 4's per-layer
+  embeddings and KV sharing, ...) and the manifest. The surfaces themselves are model-agnostic.
 - **Localhost only, no auth** (binds `127.0.0.1` by default, API key ignored). Don't expose it.
 - **End-to-end HTTP streaming is about 48 tok/s vs 52–53 raw**, because of per-token Python
   detokenization and JSON/SSE overhead. Fine for humans, so use `benchmarking/bench.py` for
