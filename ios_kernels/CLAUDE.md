@@ -8,40 +8,95 @@ If anything here is wrong, outdated, or contradicts the code (paths, names, comm
 **stop immediately and tell the user** what is wrong. Don't work around it or silently fix it;
 fix this file together with the user first.
 
-## Worktree setup
+## Large files and worktrees
 
-Large artifacts live in `<checkout>/.context/` (`DATA_DIR` in `surfaces/paths.py`), which is gitignored:
+Every large artifact except HF downloads has exactly one copy, in the **main checkout's**
+`.context/` (gitignored; `DATA_DIR` in `surfaces/paths.py`). The main checkout is the folder that
+contains the repo's `.git` directory. Every other worktree (e.g. a Conductor workspace) symlinks
+folders from it.
 
-- `.context/models/`: converted weights for every engine (what goes in it: `benchmarking/setup.py`).
-- `.context/deps/`: the llama.cpp checkout and build (the benchmark baseline).
+- `models/`: converted weights for every model and every format: our kernels' `.bin` files, GGUFs
+  (quantized ones included), MLX conversions.
+- `deps/`: the llama.cpp checkout and build (the benchmark baseline).
+- Any other large output worth keeping (e.g. profiling traces) gets its own folder, e.g. `prof/`.
+  Create it in the main checkout first, then link it like the others.
 
-The main checkout (the folder that contains the repo's `.git` directory) holds the only copy, created
-there by `make -C ios_kernels setup`. Every other worktree (e.g. a Conductor workspace) symlinks those
-two folders instead of re-creating them. Link the two folders, not `.context` itself: the rest of a
-worktree's `.context/` (e.g. Conductor's notes) stays per-worktree.
+HF downloads live in the global HF cache (`~/.cache/huggingface/`), which every worktree already
+shares.
 
-From the root of a worktree, before running anything in `ios_kernels/`:
+**Never leave a large artifact only in a worktree's own `.context/`.** When Conductor archives a
+workspace, it moves that workspace's `.context/` to `~/conductor/archived-contexts/`, where
+nothing finds it.
+
+Commands below use `$MAIN` for the main checkout. Each agent shell call starts fresh, so set it in
+the same call with the first line of the snippet below. In commands you hand to the user, write
+out the absolute path.
+
+### Setting up a worktree
+
+From the root of the worktree, before running anything in `ios_kernels/`:
 
 ```sh
 MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"   # the main checkout
 mkdir -p .context
-ln -s "$MAIN/.context/models" .context/models
-ln -s "$MAIN/.context/deps" .context/deps
+[ -e .context/models ] || ln -s "$MAIN/.context/models" .context/models
+[ -e .context/deps ]   || ln -s "$MAIN/.context/deps"   .context/deps
 ```
+
+The guards matter: `ln -s` onto an existing folder or link silently creates a link *inside* it
+(e.g. `$MAIN/.context/models/models`). Link whole folders, never single files and never `.context`
+itself; the rest of a worktree's `.context/` (Conductor's notes, small scratch output) stays
+per-worktree. To remove a link: `rm .context/models`, **without** a trailing slash (with one,
+`rm -r` follows the link and deletes the shared data).
 
 Then check:
 
-- `git status --short` shows nothing under `.context` (it is gitignored); if it shows up, stop and
-  tell the user instead of committing it.
+- `ls -ld .context/models .context/deps` shows both as links (`->`) into `$MAIN/.context/`. If one
+  is a real folder, stop and tell the user: its contents have to end up in `$MAIN/.context/`
+  (llama.cpp gets rebuilt there, not moved) before the folder is replaced by the link.
+- `git status --short` shows nothing under `.context`. If it does, stop and tell the user instead
+  of committing it.
+- `ls -L .context/models/` has your kernel's `weights` file (named in its `kernel.json`) and its
+  model's baseline files (named in `BASELINES` in `surfaces/paths.py`). If one is missing, see
+  "Missing artifacts" below.
+- `.context/deps/llama.cpp/build/bin/llama-bench --help` runs. A `Library not loaded: @rpath/...`
+  error means the path the build was made at no longer exists: the build was moved, or it was
+  built through a worktree's link and that worktree is gone. See "Rebuilding llama.cpp" below.
 - `make -C ios_kernels smoke` starts a server on the shared weights and answers a question.
 
-Notes:
+### Creating artifacts
 
-- If `$MAIN/.context/models` doesn't exist, run `make -C ios_kernels setup` in the main checkout first.
-- Writes through the links land in the shared copy, which every worktree sees.
-- To remove the links: `rm .context/models .context/deps`, **without** a trailing slash. With a
-  trailing slash, `rm -r` follows the link and deletes the shared data.
-- Without symlinks, launcher commands also accept `--data-dir "$MAIN/.context"`.
+- Write new artifacts straight into `$MAIN/.context/`, so every worktree sees them at once:
+  `--out "$MAIN/.context/models/<file>"` for a kernel's `convert_weights.py` (llama.cpp and mlx-lm
+  tools have their own output flags; see `benchmarking/setup.py`), and `--data-dir "$MAIN/.context"`
+  for launcher commands that write, e.g. `make -C ios_kernels setup args="--kernel <name> --data-dir $MAIN/.context"`.
+- A new format gets a new file name that says what it is (e.g. `..._q8_0.gguf`). Set it as the new
+  kernel's `weights` in `kernel.json`; a copied kernel still names its parent's file.
+- Only overwrite, rename or delete shared files you created yourself. Other worktrees may be using
+  the rest.
+- If a write stops partway (error, Ctrl-C, full disk), delete the file it was writing before you
+  retry. `setup` skips anything that exists, even a truncated file.
+
+### Rebuilding llama.cpp
+
+**Never move a build tree.** llama.cpp's binaries load their libraries from the absolute path they
+were built in. Build it only at its final place, `$MAIN/.context/deps/llama.cpp`, by passing
+`--data-dir "$MAIN/.context"` to `setup` (not through a worktree's link).
+
+`setup` skips llama.cpp while `build/bin/llama-bench` exists, even if it is broken, and cmake
+refuses to reuse a build folder that was moved. To rebuild, ask the user to run
+`rm -rf <main checkout>/.context/deps/llama.cpp/build`, then run the `setup` command above with a
+kernel whose weights already exist (otherwise it also downloads and converts them).
+
+### Missing artifacts
+
+1. For a missing plain file or folder (weights, GGUFs, MLX conversions, traces), look for a
+   stranded copy first: `find ~/conductor/archived-contexts -name '<file>'`. If you find one, tell
+   the user and give them `mv -n <found> <main checkout>/.context/models/` with absolute paths
+   rather than moving shared data yourself. Never do this for llama.cpp: rebuild it instead.
+2. Otherwise re-create it with the `setup` command above. It writes the kernel's weights and
+   baselines, skipping what already exists. Check free disk first (`df -h`); weights are several
+   GB each.
 
 ## Adding a kernel
 
@@ -92,8 +147,9 @@ grep -rl '^parent: kernel_metal_f16_20261024-1620$' kernels/*/*/README.md   # ch
 ## Rules
 
 - **Kernel folders are immutable** once merged. Iterate by copying. Only doc fixes are allowed in old folders.
-- **Large artifacts never go in git**: weights, GGUFs, and llama.cpp go in `<repo>/.context/`
-  (`$DATA_DIR`); build output goes in each kernel's gitignored `.build/`.
+- **Large artifacts never go in git**: weights, GGUFs, and llama.cpp go in the main checkout's
+  `.context/`, symlinked into worktrees ("Large files and worktrees" above); build output goes in
+  each kernel's gitignored `.build/`.
 - **Find kernels by path through `surfaces/paths.py`** (`resolve_kernel`, `KERNELS_ROOT`, `baseline`), not by
   hard-coding folder names.
 - **Every folder has a `README.md`** whose top is a one-sentence description of the folder.
@@ -124,8 +180,8 @@ New utility scripts go here.
 From `ios_kernels/`:
 - `uv run ruff check .` and `uv run ruff format --check .`: lint and format (config in
   `pyproject.toml`). Both must be clean; `uv run ruff format .` fixes formatting.
-- `uv run pytest`: unit tests always run. Kernel e2e tests need `.context/models/*.bin`
-  (run `uv run --extra bench benchmarking/setup.py`) and compare exact greedy output against HF.
+- `uv run pytest`: unit tests always run. Kernel e2e tests need the default kernel's weights in
+  `.context/models/` (see "Missing artifacts" above) and compare exact greedy output against HF.
 - `uv run --extra bench python benchmarking/reference.py --kernel <name>`: logits/tokens vs HF.
 - `uv run --extra bench benchmarking/bench.py --kernel <name>`: pp512 / tg128 vs llama.cpp and MLX.
 

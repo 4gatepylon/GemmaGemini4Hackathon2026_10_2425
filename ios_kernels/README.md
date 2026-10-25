@@ -21,7 +21,8 @@ ios_kernels/                 a uv project (pyproject.toml)
 ```
 
 Large artifacts (weights, GGUF, MLX model, llama.cpp checkout) live in the gitignored
-`<repo>/.context/` (override with `--data-dir`).
+`<repo>/.context/` (override with `--data-dir`). There is one copy, in the main checkout's `.context/`;
+other git worktrees symlink its folders, not `.context` itself ([CLAUDE.md](CLAUDE.md#large-files-and-worktrees)).
 
 ## Quickstart
 
