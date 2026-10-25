@@ -2,17 +2,16 @@
 
 Kernels are grouped by model: `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/`, where
 `<model>` is the HF repo id with `/` replaced by `__` (e.g. `unsloth__Llama-3.2-1B-Instruct`).
-For now only `unsloth__Llama-3.2-1B-Instruct` is used (hard-coded in `surfaces/paths.py`
-and `benchmarking/common.sh`). How to add a kernel, and the lineage header each kernel's
+For now only `unsloth__Llama-3.2-1B-Instruct` is used (hard-coded in `surfaces/paths.py`). How to add a kernel, and the lineage header each kernel's
 README starts with: [../CLAUDE.md](../CLAUDE.md).
 
 Each folder `kernel_<name>_<YYYYMMDD-HHMM>/` is a self-contained, **immutable snapshot**
 of one inference engine version (kernels, host code, weight converter, build script).
 To iterate, copy the newest folder under a new timestamp and change the copy. Old
-versions stay runnable, so `benchmarking/bench.sh <old>` vs `<new>` is always possible.
+versions stay runnable, so `benchmarking/bench.py --kernel <old>` vs `<new>` is always possible.
 
 The newest folder (by timestamp suffix) is the default everywhere: `openai-server`,
-`benchmarking/*.sh`, `benchmarking/reference.py`, and the e2e tests.
+`benchmarking/*.py`, and the e2e tests.
 
 Each folder must satisfy the contract in
 [../surfaces/DESIGN_AND_LIMITATIONS.md](../surfaces/DESIGN_AND_LIMITATIONS.md#how-to-swap-things):

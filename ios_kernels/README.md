@@ -10,7 +10,7 @@ ios_kernels/                 a uv project (pyproject.toml): `uv sync` once
   kernels/                   one folder per model, then one immutable folder per engine version; newest is the default
     unsloth__Llama-3.2-1B-Instruct/
       kernel_metal_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
-  benchmarking/              setup.sh (llama.cpp + weights), bench.sh, reference.py (correctness)
+  benchmarking/              setup.py (llama.cpp + weights), bench.py, reference.py (correctness)
   utils/                     helper scripts (`uv run utils/kernel_lineage.py`: kernel lineage tree per model)
   surfaces/                  try it by hand: OpenAI-compatible server + CLI chat (Python)
     DESIGN_AND_LIMITATIONS.md   how surfaces, runners and kernels plug together, and what they don't do
@@ -24,11 +24,11 @@ Large artifacts (weights, GGUF, MLX model, llama.cpp checkout) live in the gitig
 ```sh
 cd ios_kernels
 uv sync
-benchmarking/setup.sh             # one-time: builds llama.cpp, converts weights (~7.5 GB), builds the kernel
+uv run --extra bench benchmarking/setup.py   # one-time: builds llama.cpp, converts weights (~7.5 GB), builds the kernel
 uv run openai-server              # serves the newest kernel at http://127.0.0.1:8000/v1
 uv run cli-chat                   # chat with it (in another terminal)
 uv run pytest                     # API/CLI tests + end-to-end kernel tests
-benchmarking/bench.sh             # ours vs llama.cpp vs MLX
+uv run --extra bench benchmarking/bench.py   # ours vs llama.cpp vs MLX
 uv run --extra bench python benchmarking/reference.py   # correctness vs HF transformers
 ```
 
@@ -52,4 +52,4 @@ after the 512-token prompt, the others from an empty cache.
   range ±27), same top-5, 32/32 greedy tokens identical. Also checked end to end through
   the server (`surfaces/tests/test_kernel_e2e.py`).
 - **Through the server** (manual testing), streaming runs at about 48 tok/s with ~50 ms
-  time-to-first-token. Use `bench.sh` for performance numbers, not the server.
+  time-to-first-token. Use `bench.py` for performance numbers, not the server.

@@ -12,8 +12,7 @@ fix this file together with the user first.
 
 1. Pick the model folder: `kernels/<model>/`, where `<model>` = HF repo id with `/` -> `__`
    (e.g. `unsloth/Llama-3.2-1B-Instruct` -> `unsloth__Llama-3.2-1B-Instruct`).
-   Only `unsloth__Llama-3.2-1B-Instruct` is wired up (hard-coded in `surfaces/paths.py`
-   and `benchmarking/common.sh`).
+   Only `unsloth__Llama-3.2-1B-Instruct` is wired up (hard-coded in `surfaces/paths.py`).
 2. Copy the parent kernel folder (usually the newest) to
    `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/`, or start an empty folder for a root kernel.
    - `<name>`: short, lowercase, `_`-separated, describes what the kernel *is*
@@ -60,8 +59,7 @@ grep -rl '^parent: kernel_metal_f16_20261024-1620$' kernels/*/*/README.md   # ch
   (`$DATA_DIR`); build output goes in each kernel's gitignored `.build/`.
 - **Find kernels by path through `surfaces/paths.py`** (`resolve_kernel`, `KERNELS_DIR`), not by
   hard-coding folder names.
-- **New scripts are Python, runnable with `uv run`** (deps in `pyproject.toml`), not bash.
-  Existing `.sh` files (`benchmarking/*.sh`, each kernel's `build.sh`) will be ported later.
+- **Scripts are Python, runnable with `uv run`** (deps in `pyproject.toml`), never bash.
 - **Keep changes minimal** and match the surrounding style.
 
 ## Utilities (`utils/`)
@@ -75,9 +73,9 @@ New utility scripts go here.
 
 From `ios_kernels/`:
 - `uv run pytest`: unit tests always run. Kernel e2e tests need `.context/models/*.bin`
-  (run `benchmarking/setup.sh`) and compare exact greedy output against HF.
+  (run `uv run --extra bench benchmarking/setup.py`) and compare exact greedy output against HF.
 - `uv run --extra bench python benchmarking/reference.py --kernel <name>`: logits/tokens vs HF.
-- `benchmarking/bench.sh <name>`: pp512 / tg128 vs llama.cpp and MLX.
+- `uv run --extra bench benchmarking/bench.py --kernel <name>`: pp512 / tg128 vs llama.cpp and MLX.
 
 ## PRs
 
