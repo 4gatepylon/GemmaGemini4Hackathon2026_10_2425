@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the Swift engine. Kernels are compiled at runtime, so no Metal toolchain is needed.
 
-    uv run kernels/<model>/<kernel>/build.py   (or run it directly)
+uv run kernels/<model>/<kernel>/build.py   (or run it directly)
 """
 
 import subprocess

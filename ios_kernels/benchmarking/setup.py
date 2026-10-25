@@ -30,8 +30,16 @@ def main() -> None:
     if not (LLAMA_DIR / "build/bin/llama-bench").exists():
         if not LLAMA_DIR.is_dir():
             run("git", "clone", "--depth", "1", "https://github.com/ggml-org/llama.cpp", LLAMA_DIR)
-        run("cmake", "-S", LLAMA_DIR, "-B", LLAMA_DIR / "build",
-            "-DCMAKE_BUILD_TYPE=Release", "-DGGML_METAL=ON", "-DLLAMA_CURL=OFF")
+        run(
+            "cmake",
+            "-S",
+            LLAMA_DIR,
+            "-B",
+            LLAMA_DIR / "build",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DGGML_METAL=ON",
+            "-DLLAMA_CURL=OFF",
+        )
         run("cmake", "--build", LLAMA_DIR / "build", "-j", "10", "--target", "llama-bench", "llama-cli", "llama-server")
 
     # Full HF snapshot (weights + config + tokenizer) in the local cache.

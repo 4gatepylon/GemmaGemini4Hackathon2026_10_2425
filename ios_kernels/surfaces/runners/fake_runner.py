@@ -33,5 +33,8 @@ class FakeRunner(Runner):
             if self.delay:
                 time.sleep(self.delay)
             yield Chunk(w)
-        yield Chunk(finish_reason="length" if len(words) > max_tokens else "stop",
-                    prompt_tokens=prompt_tokens, completion_tokens=len(out))
+        yield Chunk(
+            finish_reason="length" if len(words) > max_tokens else "stop",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=len(out),
+        )

@@ -33,7 +33,10 @@ class KernelRunner(Runner):
         # stderr is inherited so kernel logs show up in the server's terminal.
         self.proc = subprocess.Popen(
             [str(binary), "--weights", str(weights_path), "--serve", "--max-ctx", str(max_ctx)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            bufsize=1,
         )
         ready = self._read()
         if not ready.get("ready"):
@@ -74,8 +77,12 @@ class KernelRunner(Runner):
                         yield Chunk(text)
                 elif msg.get("done"):
                     done = True
-                    yield Chunk(dec.flush(), finish_reason=msg["finish_reason"],
-                                prompt_tokens=msg["prompt_tokens"], completion_tokens=msg["completion_tokens"])
+                    yield Chunk(
+                        dec.flush(),
+                        finish_reason=msg["finish_reason"],
+                        prompt_tokens=msg["prompt_tokens"],
+                        completion_tokens=msg["completion_tokens"],
+                    )
                     return
         finally:
             # Consumer stopped early (e.g. client disconnected): drain this response so the

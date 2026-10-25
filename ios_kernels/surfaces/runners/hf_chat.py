@@ -35,10 +35,10 @@ class IncrementalDecoder:
         text = self.tok.decode(self.ids, skip_special_tokens=True)
         if text.endswith("�"):
             return ""
-        delta, self.sent = text[self.sent:], len(text)
+        delta, self.sent = text[self.sent :], len(text)
         return delta
 
     def flush(self) -> str:
         text = self.tok.decode(self.ids, skip_special_tokens=True)
-        delta, self.sent = text[self.sent:], len(text)
+        delta, self.sent = text[self.sent :], len(text)
         return delta

@@ -20,9 +20,18 @@ from surfaces.runners.hf_chat import ChatTokenizer
 
 
 def run_engine(binary: str, weights: str, ids: list[int], gen: int, logits_path: str, extra: list[str]) -> dict:
-    cmd = [binary, "--weights", weights,
-           "--prompt-ids", ",".join(map(str, ids)), "--gen", str(gen),
-           "--dump-logits", logits_path, *extra]
+    cmd = [
+        binary,
+        "--weights",
+        weights,
+        "--prompt-ids",
+        ",".join(map(str, ids)),
+        "--gen",
+        str(gen),
+        "--dump-logits",
+        logits_path,
+        *extra,
+    ]
     return json.loads(subprocess.check_output(cmd).decode().strip().splitlines()[-1])
 
 
@@ -56,13 +65,16 @@ def main() -> None:
     model.eval()
     with torch.no_grad():
         ref = model(torch.tensor([ids])).logits[0, -1].numpy()
-        ref_gen = model.generate(torch.tensor([ids]), max_new_tokens=args.gen, do_sample=False,
-                                 temperature=None, top_p=None)[0, len(ids):].tolist()
+        ref_gen = model.generate(
+            torch.tensor([ids]), max_new_tokens=args.gen, do_sample=False, temperature=None, top_p=None
+        )[0, len(ids) :].tolist()
 
     diff = np.abs(ours - ref)
     top_ours, top_ref = np.argsort(-ours)[:5], np.argsort(-ref)[:5]
-    n_match = next((i for i, (a, b) in enumerate(zip(res["tokens"], ref_gen, strict=False)) if a != b),
-                   min(len(res["tokens"]), len(ref_gen)))
+    n_match = next(
+        (i for i, (a, b) in enumerate(zip(res["tokens"], ref_gen, strict=False)) if a != b),
+        min(len(res["tokens"]), len(ref_gen)),
+    )
     print(f"logits: max|diff| {diff.max():.4f}, mean|diff| {diff.mean():.5f}, ref range ±{np.abs(ref).max():.1f}")
     print(f"top5 ours {top_ours.tolist()} ref {top_ref.tolist()}")
     print(f"greedy: first {n_match}/{len(ref_gen)} tokens match")
