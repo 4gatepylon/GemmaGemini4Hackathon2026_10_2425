@@ -1,0 +1,26 @@
+{
+  "name": "roofline bandwidth",
+  "description": "Streaming read/copy/write over 512 MiB (far beyond the caches). The best GB/s becomes the bandwidth roof in peaks.json.",
+  "source": "roofline.metal",
+  "roof": "bandwidth",
+  "defines": {"UNROLL": 4},
+  "vars": {"N4": "32 * 1024 * 1024", "THREADS": "18 * 16384"},
+  "buffers": {
+    "src":  {"type": "float", "count": "4 * N4", "init": "random"},
+    "dst":  {"type": "float", "count": "4 * N4"},
+    "sink": {"type": "float", "count": 1024}
+  },
+  "steps": [
+    {"name": "read", "kernel": "read_bw",
+     "bind": [{"buf": "src"}, {"buf": "sink"}, {"u32": "N4"}],
+     "grid": ["THREADS"], "threads": [256], "bytes": "N4 * 16"},
+    {"name": "copy", "kernel": "copy_bw",
+     "bind": [{"buf": "src"}, {"buf": "dst"}, {"u32": "N4"}],
+     "grid": ["THREADS"], "threads": [256], "bytes": "2 * N4 * 16"},
+    {"name": "write", "kernel": "write_bw",
+     "bind": [{"buf": "dst"}, {"u32": "N4"}],
+     "grid": ["THREADS"], "threads": [256], "bytes": "N4 * 16"}
+  ],
+  "warmup": 2,
+  "reps": 10
+}
