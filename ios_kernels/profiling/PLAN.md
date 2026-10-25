@@ -1,5 +1,7 @@
 # PLAN: profiling our Metal kernels vs llama.cpp
 
+> As of: main @ 76055cc, 2026-10-24 14:00 PDT
+
 > NOTE: this was written by: an earlier agent session (model and harness not recorded), landed in
 > commit 4df248c (#3). These two notes were added by Claude Opus 5.5 (`claude-opus-5-5`) in
 > Claude Code, Conductor workspace, 2026-10-24.
