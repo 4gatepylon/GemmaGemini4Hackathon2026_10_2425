@@ -59,6 +59,9 @@ grep -rl '^parent: kernel_metal_f16_20261024-1620$' kernels/*/*/README.md   # ch
   (`$DATA_DIR`); build output goes in each kernel's gitignored `.build/`.
 - **Find kernels by path through `surfaces/paths.py`** (`resolve_kernel`, `KERNELS_DIR`), not by
   hard-coding folder names.
+- **Every folder has a `README.md`** whose top is a one-sentence description of the folder.
+  "Top" means right after any required top-of-file formatting (the `# <title>` line, and in kernel
+  folders the header block above), not before it. Gitignored folders (`.build/`, etc.) are exempt.
 - **Scripts are Python, runnable with `uv run`** (deps in `pyproject.toml`), never bash.
 - **Keep changes minimal** and match the surrounding style.
 
