@@ -31,8 +31,8 @@ ln -s "$MAIN/.context/deps" .context/deps
 
 Then check:
 
-- `git status --short` shows nothing under `.context`. It is ignored through the repo's shared
-  `.git/info/exclude`; if it shows up, stop and tell the user instead of committing it.
+- `git status --short` shows nothing under `.context` (it is gitignored); if it shows up, stop and
+  tell the user instead of committing it.
 - `make -C ios_kernels smoke` starts a server on the shared weights and answers a question.
 
 Notes:
