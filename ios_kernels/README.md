@@ -11,6 +11,7 @@ ios_kernels/                 a uv project (pyproject.toml): `uv sync` once
     unsloth__Llama-3.2-1B-Instruct/
       kernel_metal_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
   benchmarking/              setup.sh (llama.cpp + weights), bench.sh, reference.py (correctness)
+  utils/                     helper scripts (`uv run utils/kernel_lineage.py`: kernel lineage tree per model)
   surfaces/                  try it by hand: OpenAI-compatible server + CLI chat (Python)
     DESIGN_AND_LIMITATIONS.md   how surfaces, runners and kernels plug together, and what they don't do
 ```
