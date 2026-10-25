@@ -1,0 +1,23 @@
+{
+  "name": "gemm f16",
+  "description": "Y[T,M] = X[T,K] W[M,K]^T, prefill-shaped (T = prompt tokens). Compute bound: compare GFLOP/s with the roof. Two implementations of the same product, timed independently.",
+  "source": "matmul.metal",
+  "vars": {"T": 512, "M": 2048, "K": 2048},
+  "buffers": {
+    "W": {"type": "half",  "count": "M * K", "init": "random"},
+    "X": {"type": "half",  "count": "T * K", "init": "random"},
+    "Y": {"type": "float", "count": "T * M"}
+  },
+  "steps": [
+    {"name": "naive", "kernel": "gemm_naive_f16",
+     "bind": [{"buf": "W"}, {"buf": "X"}, {"buf": "Y"}, {"u32": "T"}, {"u32": "M"}, {"u32": "K"}],
+     "grid": ["M", "T"], "threads": [32, 8],
+     "bytes": "M * K * 2 + T * K * 2 + T * M * 4", "flops": "2 * T * M * K"},
+    {"name": "simdgroup", "kernel": "gemm_simd_f16",
+     "bind": [{"buf": "W"}, {"buf": "X"}, {"buf": "Y"}, {"u32": "T"}, {"u32": "M"}, {"u32": "K"}],
+     "threadgroups": ["M / 64", "T / 64"], "threads": [128],
+     "bytes": "M * K * 2 + T * K * 2 + T * M * 4", "flops": "2 * T * M * K"}
+  ],
+  "warmup": 3,
+  "reps": 20
+}

@@ -1,0 +1,26 @@
+{
+  "name": "roofline compute",
+  "description": "simdgroup_matrix FP16->FP32 MMA and scalar FP32 FMA throughput. The best GFLOP/s (the MMA, normally) becomes the FLOP roof in peaks.json.",
+  "source": "roofline.metal",
+  "roof": "flops",
+  "defines": {"MMA_ACC": 8},
+  "vars": {"TG": "18 * 64", "SG": 4, "ITERS": 4096, "FMA_THREADS": "18 * 16384", "FMA_ITERS": 2048},
+  "buffers": {
+    "ab":   {"type": "half",  "count": 128, "init": {"random": [-0.01, 0.01]}},
+    "out":  {"type": "float", "count": "TG * SG * 64 * MMA_ACC"},
+    "seed": {"type": "float", "count": 2, "init": {"const": 0.999}},
+    "fout": {"type": "float", "count": "FMA_THREADS"}
+  },
+  "steps": [
+    {"name": "mma_f16_f32", "kernel": "mma_peak",
+     "bind": [{"buf": "ab"}, {"buf": "out"}, {"u32": "ITERS"}],
+     "threadgroups": ["TG"], "threads": ["32 * SG"],
+     "flops": "TG * SG * ITERS * MMA_ACC * 1024"},
+    {"name": "fma_f32", "kernel": "fma_peak",
+     "bind": [{"buf": "seed"}, {"buf": "fout"}, {"u32": "FMA_ITERS"}],
+     "grid": ["FMA_THREADS"], "threads": [256],
+     "flops": "FMA_THREADS * FMA_ITERS * 64"}
+  ],
+  "warmup": 2,
+  "reps": 10
+}

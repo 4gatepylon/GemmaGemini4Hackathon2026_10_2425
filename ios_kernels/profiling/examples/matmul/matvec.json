@@ -1,0 +1,21 @@
+{
+  "name": "matvec f16",
+  "description": "y = W x, W fp16 [M,K]. Bandwidth bound: compare GB/s with the roof. W is rotated across ROT copies (default 4 x 32 MiB) so consecutive dispatches don't hit in cache, like distinct layers in a real forward pass. --set ROT=1 shows the cache-warm number.",
+  "source": "matmul.metal",
+  "defines": {"NR": 4, "NSG": 8},
+  "vars": {"M": 4096, "K": 4096, "ROT": 4},
+  "buffers": {
+    "W": {"type": "half",  "count": "M * K", "init": "random", "rotate": "ROT"},
+    "x": {"type": "float", "count": "K", "init": "random"},
+    "y": {"type": "float", "count": "M"}
+  },
+  "steps": [
+    {"name": "matvec", "kernel": "matvec_f16",
+     "bind": [{"buf": "W"}, {"buf": "x"}, {"buf": "y"}, {"u32": "M"}, {"u32": "K"}],
+     "threadgroups": ["M / (NR * NSG)"], "threads": ["32 * NSG"],
+     "bytes": "M * K * 2 + K * 4 + M * 4", "flops": "2 * M * K",
+     "repeat": 8}
+  ],
+  "warmup": 5,
+  "reps": 30
+}
