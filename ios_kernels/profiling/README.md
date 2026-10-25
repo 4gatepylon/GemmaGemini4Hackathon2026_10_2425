@@ -246,3 +246,39 @@ uv run profiling/tools/xctrace_export.py $DATA_DIR/prof/xctrace/dec.trace --vali
   `RegionProfiler` users. For llama.cpp, whose encoders are unlabeled and hold many ops,
   it's a fraction of a token. Per-kernel llama.cpp timelines need the shader timeline
   (PLAN.md, objective 4).
+
+## Charts: `kviz.py`
+
+```sh
+K=profiling/tools/kviz.py
+uv run --extra profiling $K gantt RUN.json                          # timeline PNG (rep 0 by default)
+uv run --extra profiling $K gantt RUN.json --start-ms 0 --end-ms 1.2 # zoom (ms from the first GPU event)
+uv run --extra profiling $K flame RUN.json                          # aggregate icicle / flame graph PNG
+uv run --extra profiling $K share RUN.json                          # GPU time per kernel, one bar each
+uv run $K perfetto RUN.json OTHER.json --open                       # interactive timeline in ui.perfetto.dev
+uv run $K folded RUN.json                                           # folded stacks for speedscope.app
+uv run $K table RUN.json --md                                       # the results as a table
+```
+
+| view | example |
+|---|---|
+| `gantt`: nesting rows (rep > layer > group > kernel), one color per kernel | ![gantt](docs/gantt.png) |
+| `gantt` zoomed into one layer | ![gantt zoom](docs/gantt-zoom.png) |
+| `gantt` of an xctrace export: another process's GPU work interleaved with ours | ![preemption](docs/gantt-preemption.png) |
+| `flame`: where the time goes, aggregated over reps and layers | ![flame](docs/flame.png) |
+| `share`: GPU time per kernel with GB/s and % of roof | ![share](docs/share.png) |
+| `perfetto`: the same events in ui.perfetto.dev | ![perfetto](docs/perfetto.png) |
+
+- Kernels get colors from a fixed 8-slot palette, validated for color-vision deficiency, in
+  order of first appearance in the file. Past 8 kernels, the smallest fold into "Other".
+  Zooming never recolors a kernel. Render several files in one `gantt` call when their
+  colors must match.
+- `perfetto` writes the Chrome Trace Event format: one process per input file, one thread per
+  track, nested slices from `stack`, and counters as counter tracks. Flat tracks with
+  overlapping slices are split into lanes, because Perfetto drops partially overlapping
+  slices on one thread. `--open` serves the file once on 127.0.0.1:9001 and opens
+  ui.perfetto.dev on it (the trace is processed in the browser; Chrome may ask to allow
+  local network access). Without `--open`, drag the file onto ui.perfetto.dev.
+- `folded` aggregates `stack` paths (`layer 7` -> `layer` unless `--keep-indices`) into
+  `a;b;c <ns>` lines for speedscope or `flamegraph.pl`.
+- PNG commands need matplotlib (the `profiling` extra) and take `--dark` for the dark palette.

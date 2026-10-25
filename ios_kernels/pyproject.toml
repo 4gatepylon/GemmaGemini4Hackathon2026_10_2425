@@ -16,6 +16,8 @@ dependencies = [
 bench = ["torch>=2.4", "safetensors>=0.4", "numpy>=1.26", "gguf>=0.10", "sentencepiece>=0.2", "mlx-lm>=0.20"]
 # In-process MLX backend for the server (--runner mlx).
 mlx = ["mlx-lm>=0.20"]
+# Static charts from profiling results (profiling/tools/kviz.py).
+profiling = ["matplotlib>=3.8"]
 
 [project.scripts]
 openai-server = "surfaces.openai_server.server:main"
