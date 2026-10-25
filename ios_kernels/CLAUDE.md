@@ -64,8 +64,10 @@ grep -rl '^parent: kernel_metal_f16_20261024-1620$' kernels/*/*/README.md   # ch
   folders the header block above), not before it. Gitignored folders (`.build/`, etc.) are exempt.
 - **Docs are written in present tense and built not to go stale quickly**: describe what is
   and point to the source of truth (code, `kernel.json`, scripts) instead of copying volatile
-  details like numbers, file lists, or status. Exceptions: `PLAN.md` and `DESIGN_AND_LIMITATIONS.md`
-  files are working notes for agents in the loop and can hold plans, status, and history.
+  details like numbers, file lists, or status. Anything only in the scope of one conversation
+  (what was just tried, fixed, or discussed) does not go in docs. Exceptions: `PLAN.md` and
+  `DESIGN_AND_LIMITATIONS.md` files are working notes for agents in the loop and can hold plans,
+  status, and history.
 - **Scripts are Python, runnable with `uv run`** (deps in `pyproject.toml`), never bash.
 - **Keep changes minimal** and match the surrounding style.
 
