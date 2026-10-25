@@ -105,7 +105,8 @@ def test_data_dir_flag_reaches_tools(tmp_path):
         text=True,
         cwd=HERE,
     )
-    assert r.returncode != 0 and str(tmp_path / "models" / "llama1b_f16.gguf") in r.stderr
+    gguf = tmp_path / "models" / launcher.paths().baseline("gguf").name
+    assert r.returncode != 0 and str(gguf) in r.stderr
 
 
 def test_smoke_with_fake_runner(capfd):
