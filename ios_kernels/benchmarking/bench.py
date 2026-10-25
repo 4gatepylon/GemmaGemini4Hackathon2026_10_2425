@@ -16,8 +16,13 @@ from surfaces.paths import LLAMA_DIR, MODELS_DIR, load_manifest, resolve_kernel
 
 def show(cmd: list, pattern: str, merge_stderr: bool = False) -> None:
     """Run cmd and print only the output lines matching pattern."""
-    out = subprocess.run([str(c) for c in cmd], check=True, text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT if merge_stderr else subprocess.DEVNULL).stdout
+    out = subprocess.run(
+        [str(c) for c in cmd],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT if merge_stderr else subprocess.DEVNULL,
+    ).stdout
     for line in out.splitlines():
         if re.search(pattern, line):
             print(line)
@@ -38,18 +43,60 @@ def main() -> None:
     subprocess.run([str(kernel / manifest["build"])], check=True, stdout=subprocess.DEVNULL)
 
     print(f"== ours: {kernel.name} ==", flush=True)
-    show([kernel / manifest["binary"], "--weights", MODELS_DIR / manifest["weights"],
-          "--bench-pp", pp, "--bench-tg", tg, "--reps", reps, *args.engine_args.split()],
-         r"^(pp|tg)", merge_stderr=True)
+    show(
+        [
+            kernel / manifest["binary"],
+            "--weights",
+            MODELS_DIR / manifest["weights"],
+            "--bench-pp",
+            pp,
+            "--bench-tg",
+            tg,
+            "--reps",
+            reps,
+            *args.engine_args.split(),
+        ],
+        r"^(pp|tg)",
+        merge_stderr=True,
+    )
 
     commit = subprocess.check_output(["git", "-C", str(LLAMA_DIR), "log", "-1", "--format=%h"], text=True).strip()
     print(f"== llama.cpp (Metal, {commit}) ==", flush=True)
-    show([LLAMA_DIR / "build/bin/llama-bench", "-m", MODELS_DIR / "llama1b_f16.gguf",
-          "-p", pp, "-n", tg, "-r", reps, "-ngl", "99"], r"pp|tg")
+    show(
+        [
+            LLAMA_DIR / "build/bin/llama-bench",
+            "-m",
+            MODELS_DIR / "llama1b_f16.gguf",
+            "-p",
+            pp,
+            "-n",
+            tg,
+            "-r",
+            reps,
+            "-ngl",
+            "99",
+        ],
+        r"pp|tg",
+    )
 
     print("== MLX (mlx_lm; note its tg is measured after the pp prompt) ==", flush=True)
-    show([sys.executable, "-m", "mlx_lm", "benchmark", "--model", MODELS_DIR / "llama1b_mlx_f16",
-          "-p", pp, "-g", tg, "-n", reps], r"Averages")
+    show(
+        [
+            sys.executable,
+            "-m",
+            "mlx_lm",
+            "benchmark",
+            "--model",
+            MODELS_DIR / "llama1b_mlx_f16",
+            "-p",
+            pp,
+            "-g",
+            tg,
+            "-n",
+            reps,
+        ],
+        r"Averages",
+    )
 
 
 if __name__ == "__main__":

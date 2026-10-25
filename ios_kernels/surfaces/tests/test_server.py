@@ -62,8 +62,9 @@ def test_max_tokens_truncates(client):
 
 
 def test_streaming_matches_non_streaming(client):
-    chunks = list(client.chat.completions.create(model="x", messages=USER, stream=True,
-                                                 stream_options={"include_usage": True}))
+    chunks = list(
+        client.chat.completions.create(model="x", messages=USER, stream=True, stream_options={"include_usage": True})
+    )
     assert chunks[0].choices[0].delta.role == "assistant"
     text = "".join(c.choices[0].delta.content or "" for c in chunks if c.choices)
     assert text == "Echo: the quick brown fox"
@@ -83,8 +84,12 @@ def test_sse_wire_format(http):
 
 
 def test_multi_turn_uses_last_user_message(client):
-    msgs = [{"role": "system", "content": "be nice"}, {"role": "user", "content": "first"},
-            {"role": "assistant", "content": "Echo: first"}, {"role": "user", "content": "second"}]
+    msgs = [
+        {"role": "system", "content": "be nice"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "Echo: first"},
+        {"role": "user", "content": "second"},
+    ]
     assert client.chat.completions.create(model="x", messages=msgs).choices[0].message.content == "Echo: second"
 
 

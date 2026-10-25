@@ -20,7 +20,10 @@ def reply(client: OpenAI, model: str, messages: list[dict], max_tokens: int, out
     t0 = time.perf_counter()
     ttft, text, usage, finish = None, [], None, None
     stream = client.chat.completions.create(
-        model=model, messages=messages, max_tokens=max_tokens, stream=True,
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens,
+        stream=True,
         stream_options={"include_usage": True},
     )
     for chunk in stream:

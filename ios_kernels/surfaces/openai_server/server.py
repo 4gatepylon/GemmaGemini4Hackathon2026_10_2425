@@ -108,18 +108,30 @@ def create_app(runner: Runner, default_max_tokens: int = 512) -> FastAPI:
             return error(400, str(e))
 
         def usage(c: Chunk) -> dict:
-            return {"prompt_tokens": c.prompt_tokens, "completion_tokens": c.completion_tokens,
-                    "total_tokens": c.prompt_tokens + c.completion_tokens}
+            return {
+                "prompt_tokens": c.prompt_tokens,
+                "completion_tokens": c.completion_tokens,
+                "total_tokens": c.prompt_tokens + c.completion_tokens,
+            }
 
         if not req.stream:
             parts = [first, *chunks]
             last = parts[-1]
-            return JSONResponse({
-                **base, "object": "chat.completion",
-                "choices": [{"index": 0, "finish_reason": last.finish_reason,
-                             "message": {"role": "assistant", "content": "".join(c.text for c in parts)}}],
-                "usage": usage(last),
-            }, headers=SAMPLING_HEADER)
+            return JSONResponse(
+                {
+                    **base,
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": last.finish_reason,
+                            "message": {"role": "assistant", "content": "".join(c.text for c in parts)},
+                        }
+                    ],
+                    "usage": usage(last),
+                },
+                headers=SAMPLING_HEADER,
+            )
 
         include_usage = bool(req.stream_options and req.stream_options.include_usage)
 

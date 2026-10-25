@@ -14,13 +14,16 @@ from surfaces.paths import MODELS_DIR, resolve_kernel
 
 kernel_dir = resolve_kernel()
 weights = MODELS_DIR / json.loads((kernel_dir / "kernel.json").read_text())["weights"]
-pytestmark = pytest.mark.skipif(platform.system() != "Darwin" or not weights.exists(),
-                                reason=f"needs macOS + {weights}")
+pytestmark = pytest.mark.skipif(
+    platform.system() != "Darwin" or not weights.exists(), reason=f"needs macOS + {weights}"
+)
 
 SKY = [{"role": "user", "content": "Explain in two sentences why the sky is blue."}]
 # HF transformers fp32 greedy continuation (see benchmarking/reference.py).
-SKY_REF = ("The sky appears blue because of a phenomenon called Rayleigh scattering, in which shorter "
-           "wavelengths of light, such as blue and violet, are scattered more than longer wavelengths")
+SKY_REF = (
+    "The sky appears blue because of a phenomenon called Rayleigh scattering, in which shorter "
+    "wavelengths of light, such as blue and violet, are scattered more than longer wavelengths"
+)
 
 
 @pytest.fixture(scope="module")
@@ -57,16 +60,23 @@ def test_early_close_keeps_protocol_in_sync(runner):
 
 
 def test_multibyte_tokens_decode_cleanly(runner):
-    text = "".join(c.text for c in runner.stream(
-        [{"role": "user", "content": "Reply with a single emoji of a cat and nothing else."}], 16))
+    text = "".join(
+        c.text
+        for c in runner.stream(
+            [{"role": "user", "content": "Reply with a single emoji of a cat and nothing else."}], 16
+        )
+    )
     assert "�" not in text and text.strip()
 
 
 def test_server_stream_equals_non_stream(client):
     full = client.chat.completions.create(model="x", messages=SKY, max_tokens=32)
     assert full.choices[0].message.content == SKY_REF
-    streamed = "".join(c.choices[0].delta.content or "" for c in
-                       client.chat.completions.create(model="x", messages=SKY, max_tokens=32, stream=True) if c.choices)
+    streamed = "".join(
+        c.choices[0].delta.content or ""
+        for c in client.chat.completions.create(model="x", messages=SKY, max_tokens=32, stream=True)
+        if c.choices
+    )
     assert streamed == SKY_REF
 
 
@@ -88,10 +98,14 @@ def test_client_disconnect_mid_stream(runner, live_server):
 
     url = live_server(runner)
     story = [{"role": "user", "content": "Write a long story about a dragon."}]
-    with httpx.stream("POST", f"{url}/chat/completions",
-                      json={"messages": story, "stream": True, "max_tokens": 200}) as r:
+    with httpx.stream(
+        "POST", f"{url}/chat/completions", json={"messages": story, "stream": True, "max_tokens": 200}
+    ) as r:
         next(r.iter_lines())
     # The runner drains the abandoned response (<= 200 tokens, ~4 s) and then serves this one.
-    r = httpx.post(f"{url}/chat/completions", timeout=30,
-                   json={"messages": [{"role": "user", "content": "What is 2+2? Answer with a number only."}]})
+    r = httpx.post(
+        f"{url}/chat/completions",
+        timeout=30,
+        json={"messages": [{"role": "user", "content": "What is 2+2? Answer with a number only."}]},
+    )
     assert r.json()["choices"][0]["message"]["content"].strip() == "4"

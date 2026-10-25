@@ -7,8 +7,8 @@ from .base import Chunk, Message, Runner
 # name -> (module, class). Imported lazily so optional backends (e.g. MLX) aren't required.
 RUNNERS = {
     "kernel": ("surfaces.runners.kernel_runner", "KernelRunner"),  # our Metal kernels (kernels/)
-    "fake": ("surfaces.runners.fake_runner", "FakeRunner"),        # canned echo replies, for tests
-    "mlx": ("surfaces.runners.mlx_runner", "MLXRunner"),           # mlx-lm, in-process reference
+    "fake": ("surfaces.runners.fake_runner", "FakeRunner"),  # canned echo replies, for tests
+    "mlx": ("surfaces.runners.mlx_runner", "MLXRunner"),  # mlx-lm, in-process reference
 }
 
 

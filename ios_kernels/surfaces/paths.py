@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-IOS_KERNELS = Path(__file__).resolve().parents[1]          # .../ios_kernels
+IOS_KERNELS = Path(__file__).resolve().parents[1]  # .../ios_kernels
 REPO_ROOT = IOS_KERNELS.parent
 # kernels/<model id>/kernel_*; only this model is used for now.
 KERNELS_DIR = IOS_KERNELS / "kernels" / "unsloth__Llama-3.2-1B-Instruct"
