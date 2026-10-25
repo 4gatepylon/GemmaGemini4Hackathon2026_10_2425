@@ -12,8 +12,9 @@ from surfaces.openai_server.server import create_app
 from surfaces.paths import MODELS_DIR
 
 MLX_MODEL = MODELS_DIR / "llama1b_mlx_f16"
-pytestmark = pytest.mark.skipif(importlib.util.find_spec("mlx_lm") is None or not MLX_MODEL.exists(),
-                                reason=f"needs the mlx extra and {MLX_MODEL}")
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("mlx_lm") is None or not MLX_MODEL.exists(), reason=f"needs the mlx extra and {MLX_MODEL}"
+)
 
 from .test_kernel_e2e import SKY, SKY_REF  # noqa: E402
 
@@ -53,6 +54,7 @@ def test_mlx_from_other_threads(fresh_runner):
     # MLX GPU streams are per-thread; the server calls runners from worker threads.
     runner = fresh_runner
     result = {}
+
     def work():
         try:
             result["text"] = "".join(c.text for c in runner.stream(SKY, 32))
@@ -69,8 +71,11 @@ def test_mlx_through_server(fresh_runner):
     runner = fresh_runner
     client = OpenAI(base_url="http://testserver/v1", api_key="unused", http_client=TestClient(create_app(runner)))
     assert client.chat.completions.create(model="x", messages=SKY, max_tokens=32).choices[0].message.content == SKY_REF
-    streamed = "".join(c.choices[0].delta.content or "" for c in
-                       client.chat.completions.create(model="x", messages=SKY, max_tokens=32, stream=True) if c.choices)
+    streamed = "".join(
+        c.choices[0].delta.content or ""
+        for c in client.chat.completions.create(model="x", messages=SKY, max_tokens=32, stream=True)
+        if c.choices
+    )
     assert streamed == SKY_REF
 
 

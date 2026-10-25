@@ -26,6 +26,7 @@ HERE = Path(__file__).resolve().parent  # ios_kernels/
 
 # --------------------------------------------------------------------------- helpers
 
+
 def paths():
     """surfaces.paths, imported lazily so --data-dir (which sets $DATA_DIR) takes effect first."""
     from surfaces import paths as p
@@ -72,6 +73,7 @@ def free_port() -> int:
 
 
 # --------------------------------------------------------------------------- commands
+
 
 def bench_python() -> list:
     """Python with the `bench` extra (torch, mlx-lm, ...) for the benchmarking/ scripts."""
@@ -125,7 +127,7 @@ def cmd_serve_llamacpp(args, extra) -> int:
     build = ["cmake", "--build", llama / "build", "-j", "10", "--target", "llama-server"]
     if not server.exists() and (code := run(build)):
         return code
-    print(f"chat with it: make chat args=\"--port {args.port}\"", file=sys.stderr)
+    print(f'chat with it: make chat args="--port {args.port}"', file=sys.stderr)
     return run([server, "-m", gguf, "-ngl", "99", "--host", args.host, "--port", args.port, *extra])
 
 
@@ -177,8 +179,20 @@ def cmd_test_fast(args, extra) -> int:
 
 def cmd_bench(args, extra) -> int:
     """Ours vs llama.cpp vs MLX (benchmarking/bench.py)."""
-    return run([*bench_python(), HERE / "benchmarking/bench.py", "--kernel", kernel_dir(args.kernel),
-                "--pp", args.pp, "--tg", args.tg, "--reps", args.reps])
+    return run(
+        [
+            *bench_python(),
+            HERE / "benchmarking/bench.py",
+            "--kernel",
+            kernel_dir(args.kernel),
+            "--pp",
+            args.pp,
+            "--tg",
+            args.tg,
+            "--reps",
+            args.reps,
+        ]
+    )
 
 
 def cmd_bench_ours(args, extra) -> int:
@@ -188,8 +202,21 @@ def cmd_bench_ours(args, extra) -> int:
     if code := run([kdir / m["build"]]):
         return code
     defines = [x for d in args.define for x in ("--define", d)]
-    return run([kdir / m["binary"], "--weights", paths().MODELS_DIR / m["weights"],
-                "--bench-pp", args.pp, "--bench-tg", args.tg, "--reps", args.reps, *defines, *extra])
+    return run(
+        [
+            kdir / m["binary"],
+            "--weights",
+            paths().MODELS_DIR / m["weights"],
+            "--bench-pp",
+            args.pp,
+            "--bench-tg",
+            args.tg,
+            "--reps",
+            args.reps,
+            *defines,
+            *extra,
+        ]
+    )
 
 
 def cmd_reference(args, extra) -> int:
@@ -218,11 +245,13 @@ def new_kernel(name: str, src: Path, kernels_dir: Path, now: datetime | None = N
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".build", "__pycache__"))
 
     readme = dst / "README.md"
-    header = (f"# {dst.name}\n\n```yaml\nkernel: {dst.name}\nmodel: {kernels_dir.name}\norigin: derived\n"
-              f"parent: {src.name}\nchange: TODO: one line, what is new vs parent\n```\n")
+    header = (
+        f"# {dst.name}\n\n```yaml\nkernel: {dst.name}\nmodel: {kernels_dir.name}\norigin: derived\n"
+        f"parent: {src.name}\nchange: TODO: one line, what is new vs parent\n```\n"
+    )
     old = readme.read_text() if readme.exists() else ""
     m = re.match(r"# [^\n]*\n+```yaml\n.*?\n```\n", old, re.S)  # parent's title + header
-    readme.write_text(header + old[m.end():] if m else header + "\n" + old)
+    readme.write_text(header + old[m.end() :] if m else header + "\n" + old)
     return dst
 
 
@@ -288,18 +317,33 @@ command("serve-mlx", cmd_serve_mlx, server_flags, passthrough=True)
 command("serve-llamacpp", cmd_serve_llamacpp, lambda p: server_flags(p, port=8080), passthrough=True)
 command("chat", cmd_chat, client_flags, passthrough=True)
 command("ask", cmd_ask, client_flags, lambda p: p.add_argument("prompt", nargs="+"), passthrough=True)
-command("smoke", cmd_smoke, k, runner_flag,
-        lambda p: p.add_argument("--prompt", default="What is the capital of France? Answer in one sentence."))
+command(
+    "smoke",
+    cmd_smoke,
+    k,
+    runner_flag,
+    lambda p: p.add_argument("--prompt", default="What is the capital of France? Answer in one sentence."),
+)
 command("test", cmd_test, passthrough=True)
 command("test-fast", cmd_test_fast, passthrough=True)
 command("bench", cmd_bench, k, bench_flags)
-command("bench-ours", cmd_bench_ours, k, bench_flags,
-        lambda p: p.add_argument("--define", action="append", default=[], metavar="NAME=VALUE",
-                                 help="kernel tunable, repeatable (e.g. MV_NR=2)"))
+command(
+    "bench-ours",
+    cmd_bench_ours,
+    k,
+    bench_flags,
+    lambda p: p.add_argument(
+        "--define", action="append", default=[], metavar="NAME=VALUE", help="kernel tunable, repeatable (e.g. MV_NR=2)"
+    ),
+)
 command("reference", cmd_reference, k)
 command("kernels", cmd_kernels)
-command("new-kernel", cmd_new_kernel, lambda p: p.add_argument("name", help="e.g. metal_llama_q8"),
-        lambda p: p.add_argument("--from", dest="from_kernel", help="kernel to copy (default: newest)"))
+command(
+    "new-kernel",
+    cmd_new_kernel,
+    lambda p: p.add_argument("name", help="e.g. metal_llama_q8"),
+    lambda p: p.add_argument("--from", dest="from_kernel", help="kernel to copy (default: newest)"),
+)
 command("clean", cmd_clean)
 
 
@@ -308,20 +352,22 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--data-dir", help="weights / llama.cpp location (default: <repo>/.context)")
 
     parser = argparse.ArgumentParser(
-        prog="ios_kernels_launcher.py", description=__doc__.split("\n\n")[0],
+        prog="ios_kernels_launcher.py",
+        description=__doc__.split("\n\n")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="examples:\n"
-               "  make setup                                  # one-time\n"
-               "  make serve                                  # newest kernel on :8000\n"
-               "  make chat                                   # in another terminal\n"
-               "  make ask args=\"why is the sky blue\"\n"
-               "  make serve args=\"--kernel 20261024 --port 9000\"\n"
-               "  make bench-ours args=\"--define MV_NR=2 --reps 3\"\n"
-               "  make help args=serve                        # flags for one command",
+        "  make setup                                  # one-time\n"
+        "  make serve                                  # newest kernel on :8000\n"
+        "  make chat                                   # in another terminal\n"
+        '  make ask args="why is the sky blue"\n'
+        '  make serve args="--kernel 20261024 --port 9000"\n'
+        '  make bench-ours args="--define MV_NR=2 --reps 3"\n'
+        "  make help args=serve                        # flags for one command",
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
-    sub.add_parser("help", help="show this help, or `help <command>` for one command's flags") \
-        .add_argument("topic", nargs="?")
+    sub.add_parser("help", help="show this help, or `help <command>` for one command's flags").add_argument(
+        "topic", nargs="?"
+    )
     for name, (fn, configure, passthrough) in COMMANDS.items():
         doc = fn.__doc__.strip()
         if passthrough:

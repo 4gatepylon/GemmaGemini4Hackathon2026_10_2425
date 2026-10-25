@@ -34,15 +34,17 @@ def test_make_help_lists_every_command():
 
 @needs_make
 def test_make_help_for_one_command():
-    out = subprocess.run(["make", "-s", "-C", HERE, "help", "args=bench-ours"],
-                         capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        ["make", "-s", "-C", HERE, "help", "args=bench-ours"], capture_output=True, text=True, check=True
+    ).stdout
     assert "--define NAME=VALUE" in out and "--kernel KERNEL" in out
 
 
 @needs_make
 def test_make_forwards_args_verbatim():
-    out = subprocess.run(["make", "-n", "-C", HERE, "serve", "args=--port 9 --kernel x"],
-                         capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        ["make", "-n", "-C", HERE, "serve", "args=--port 9 --kernel x"], capture_output=True, text=True, check=True
+    ).stdout
     assert "ios_kernels_launcher.py serve --port 9 --kernel x" in out
 
 
@@ -66,8 +68,10 @@ def test_new_kernel_copies_without_build_output(tmp_path):
     (src / ".build").mkdir(parents=True)
     (src / ".build" / "llm").write_text("binary")
     (src / "kernel.json").write_text("{}")
-    (src / "README.md").write_text("# kernel_a_20260101-0000\n\n```yaml\nkernel: kernel_a_20260101-0000\n"
-                                   "model: org__Model\norigin: root\nparent: none\nchange: first\n```\n\nBody.\n")
+    (src / "README.md").write_text(
+        "# kernel_a_20260101-0000\n\n```yaml\nkernel: kernel_a_20260101-0000\n"
+        "model: org__Model\norigin: root\nparent: none\nchange: first\n```\n\nBody.\n"
+    )
     dst = launcher.new_kernel("metal_q8", src, model_dir, now=datetime(2026, 10, 24, 17, 5))
     assert dst.name == "kernel_metal_q8_20261024-1705"
     assert (dst / "kernel.json").exists() and not (dst / ".build").exists()
@@ -75,7 +79,8 @@ def test_new_kernel_copies_without_build_output(tmp_path):
     assert (dst / "README.md").read_text() == (
         "# kernel_metal_q8_20261024-1705\n\n```yaml\nkernel: kernel_metal_q8_20261024-1705\nmodel: org__Model\n"
         "origin: derived\nparent: kernel_a_20260101-0000\nchange: TODO: one line, what is new vs parent\n```\n"
-        "\nBody.\n")
+        "\nBody.\n"
+    )
     with pytest.raises(SystemExit, match="already exists"):
         launcher.new_kernel("metal_q8", src, model_dir, now=datetime(2026, 10, 24, 17, 5))
     with pytest.raises(SystemExit, match="bad name"):
@@ -90,8 +95,12 @@ def test_new_kernel_header_matches_real_kernel_readme():
 
 def test_data_dir_flag_reaches_tools(tmp_path):
     # In a fresh process (as from make), --data-dir must win over the default .context/.
-    r = subprocess.run([sys.executable, HERE / "ios_kernels_launcher.py", "serve-llamacpp", "--data-dir", tmp_path],
-                       capture_output=True, text=True, cwd=HERE)
+    r = subprocess.run(
+        [sys.executable, HERE / "ios_kernels_launcher.py", "serve-llamacpp", "--data-dir", tmp_path],
+        capture_output=True,
+        text=True,
+        cwd=HERE,
+    )
     assert r.returncode != 0 and str(tmp_path / "models" / "llama1b_f16.gguf") in r.stderr
 
 
