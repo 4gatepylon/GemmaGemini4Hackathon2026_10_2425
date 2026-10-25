@@ -120,7 +120,7 @@ def cmd_serve_llamacpp(args, extra) -> int:
     """llama.cpp's own llama-server on the same FP16 model (default port 8080), for side-by-side chats."""
     p = paths()
     llama = p.LLAMA_DIR
-    gguf = p.MODELS_DIR / "llama1b_f16.gguf"
+    gguf = p.baseline("gguf", kernel_dir(args.kernel))
     server = llama / "build/bin/llama-server"
     if not gguf.exists():
         raise SystemExit(f"{gguf} missing; run `make setup` first")
@@ -225,12 +225,15 @@ def cmd_reference(args, extra) -> int:
 
 
 def cmd_kernels(args, extra) -> int:
-    """List kernel folders (newest = default for every command)."""
-    kernels = paths().list_kernels()
-    for k in kernels:
-        mark = "*" if k == kernels[-1] else " "
-        print(f"{mark} {k.name:45s} {paths().load_manifest(k).get('description', '')}")
-    print("\n* = default (newest). Select another with --kernel <substring>.")
+    """List kernel folders per model (newest of the default model = default for every command)."""
+    p = paths()
+    default = p.resolve_kernel()
+    for model in sorted(p.KERNELS_ROOT.glob("*__*")):
+        print(model.name)
+        for k in p.list_kernels(model.name):
+            mark = "*" if k == default else " "
+            print(f"{mark} {k.name:45s} {p.load_manifest(k).get('description', '')}")
+    print("\n* = default (newest kernel of the default model). Select another with --kernel <substring>.")
     return 0
 
 
@@ -259,8 +262,10 @@ def cmd_new_kernel(args, extra) -> int:
     """Copy the newest kernel (or --from) to kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/ to start a new version.
     Fills in the README lineage header (CLAUDE.md); you write its `change:` line."""
     src = kernel_dir(args.from_kernel)
-    dst = new_kernel(args.name, src, paths().KERNELS_DIR)
-    print(f"created {dst.relative_to(HERE)} (copied from {src.name}); it is now the default kernel.")
+    dst = new_kernel(args.name, src, src.parent)  # same model folder as the parent
+    print(
+        f"created {dst.relative_to(HERE)} (copied from {src.name}); it is now the newest kernel of {src.parent.name}."
+    )
     print("next: set `change:` in its README header, edit it, then `make test` and `make bench-ours`,")
     print("then add a row to kernels/README.md (see CLAUDE.md).")
     return 0
@@ -268,7 +273,7 @@ def cmd_new_kernel(args, extra) -> int:
 
 def cmd_clean(args, extra) -> int:
     """Remove build outputs and caches (kernels/<model>/*/.build, __pycache__, .pytest_cache). Never touches weights."""
-    targets = [*paths().KERNELS_DIR.parent.glob("*/*/.build"), *HERE.glob(".pytest_cache")]
+    targets = [*paths().KERNELS_ROOT.glob("*/*/.build"), *HERE.glob(".pytest_cache")]
     targets += [p for p in HERE.rglob("__pycache__") if ".venv" not in p.parts]
     for t in targets:
         shutil.rmtree(t)
@@ -314,7 +319,7 @@ command("build", cmd_build, k)
 command("serve", cmd_serve, k, runner_flag, server_flags, passthrough=True)
 command("serve-fake", cmd_serve_fake, server_flags, passthrough=True)
 command("serve-mlx", cmd_serve_mlx, server_flags, passthrough=True)
-command("serve-llamacpp", cmd_serve_llamacpp, lambda p: server_flags(p, port=8080), passthrough=True)
+command("serve-llamacpp", cmd_serve_llamacpp, k, lambda p: server_flags(p, port=8080), passthrough=True)
 command("chat", cmd_chat, client_flags, passthrough=True)
 command("ask", cmd_ask, client_flags, lambda p: p.add_argument("prompt", nargs="+"), passthrough=True)
 command(

@@ -12,7 +12,7 @@ import sys
 
 from huggingface_hub import snapshot_download
 
-from surfaces.paths import LLAMA_DIR, MODELS_DIR, load_manifest, resolve_kernel
+from surfaces.paths import LLAMA_DIR, MODELS_DIR, baseline, load_manifest, resolve_kernel
 
 
 def run(*cmd) -> None:
@@ -47,7 +47,7 @@ def main() -> None:
     snap = snapshot_download(repo, allow_patterns=["*.json", "*.safetensors"])
 
     weights = MODELS_DIR / manifest["weights"]
-    gguf, mlx = MODELS_DIR / "llama1b_f16.gguf", MODELS_DIR / "llama1b_mlx_f16"
+    gguf, mlx = baseline("gguf", kernel), baseline("mlx", kernel)
     if not weights.exists():
         run(sys.executable, kernel / manifest["convert"], "--repo", repo, "--out", weights)
     if not gguf.exists():

@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 from openai import OpenAI
 
 from surfaces.openai_server.server import create_app
-from surfaces.paths import MODELS_DIR
+from surfaces.paths import baseline
 
-MLX_MODEL = MODELS_DIR / "llama1b_mlx_f16"
+MLX_MODEL = baseline("mlx")
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("mlx_lm") is None or not MLX_MODEL.exists(), reason=f"needs the mlx extra and {MLX_MODEL}"
 )
