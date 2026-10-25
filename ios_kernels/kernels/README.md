@@ -7,8 +7,9 @@ README starts with: [../CLAUDE.md](../CLAUDE.md).
 
 Each folder `kernel_<name>_<YYYYMMDD-HHMM>/` is a self-contained, **immutable snapshot**
 of one inference engine version (kernels, host code, weight converter, build script).
-To iterate, copy the newest folder under a new timestamp and change the copy. Old
-versions stay runnable, so `benchmarking/bench.py --kernel <old>` vs `<new>` is always possible.
+To iterate, `make new-kernel args=<name>` copies the newest folder under a new
+timestamp; change the copy. Old versions stay runnable, so `make bench args="--kernel <old>"`
+vs `<new>` is always possible. `make kernels` lists them.
 
 The newest folder (by timestamp suffix) is the default everywhere: `openai-server`,
 `benchmarking/*.py`, and the e2e tests.

@@ -49,19 +49,21 @@ There are two seams. They are the only places that need to stay stable:
 | **`ClosingStreamingResponse`** | Starlette doesn't close a sync generator when the client disconnects, so it would sit there until garbage collection, holding the runner lock and leaving the kernel mid-response. Every later request would then hang (found in manual testing, covered by `test_client_disconnect_*`). We close it explicitly. |
 | **The kernel drains abandoned responses** | If a stream stops early, `KernelRunner` reads and discards the rest of that response so the protocol stays in sync. This is simpler than a cancel message. |
 | **Kernel exits on stdin EOF** | If the Python server dies, even from `kill -9`, the kernel process exits on its own, so no orphaned GPU processes. |
+| **MLX work runs on one thread owned by `MLXRunner`** | MLX GPU streams are per-thread, but the server calls runners from worker threads. The first request would fail with `There is no Stream(gpu, 1) in current thread` (found via `make serve-mlx`, covered by `test_mlx_from_other_threads` / `test_mlx_through_server`). Loading and generation are queued to a dedicated thread. |
 | **`FakeRunner` echoes deterministically** | Reply = `"Echo: " + last user message`, one word per "token", `max_tokens` truncates. The API and CLI can be tested in about 1 s with no GPU or weights. |
 
 ## How to swap things
 
 ### A new kernel version (most common)
-1. Copy the newest folder to `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/` and change it.
+1. `make new-kernel args=<name>` copies the newest folder to
+   `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/` and fills in its README lineage header
+   (see `../CLAUDE.md`). Change the copy.
 2. Keep the contract (below). If the weight format changes, point `kernel.json`
    `weights` at a new file name and update its `convert_weights.py`.
-3. `uv run --extra bench benchmarking/setup.py --kernel <name>` converts the weights and builds the binary.
-   `uv run openai-server` now uses it automatically (newest). Select an older one
-   with `--kernel <substring>`.
-4. Check it: `uv run pytest` (the e2e tests run against the newest kernel),
-   `benchmarking/reference.py`, `benchmarking/bench.py`.
+3. `make setup` converts the weights and builds the binary. `make serve` now uses it
+   automatically (newest). Select an older one with `args="--kernel <substring>"`.
+4. Check it: `make test` (the e2e tests run against the newest kernel), `make reference`,
+   `make bench` (or `make bench-ours` for quick numbers).
 
 **Kernel folder contract:**
 - `kernel.json`: `{"hf_repo", "weights" (file name in $DATA_DIR/models), "build", "binary", "convert"}`
@@ -94,7 +96,8 @@ Requests are strictly sequential. Every request starts from an empty KV cache
    are only needed when that runner is used.
 
 Alternatively, for runtimes that already serve the OpenAI API (llama.cpp `llama-server`,
-Ollama, mlx-lm's server), there's nothing to write: `uv run cli-chat --base-url <their /v1>`.
+Ollama, mlx-lm's server), there's nothing to write: `make chat args="--base-url <their /v1>"` (`make serve-llamacpp`
+starts llama.cpp's on port 8080).
 
 ## Limitations (known, accepted for a manual-testing tool)
 
@@ -122,9 +125,11 @@ Ollama, mlx-lm's server), there's nothing to write: `uv run cli-chat --base-url 
   performance numbers, never the server.
 - **macOS + Apple GPU only** for the kernel runner. The fake runner and API tests run anywhere.
 
-## Tests (`uv run pytest`, about 15 s)
+## Tests (`make test`, about 20 s; `make test-fast`, about 2 s, needs no GPU)
 
 | file | needs | what |
 |---|---|---|
 | `tests/test_server.py` | nothing | FakeRunner algorithm, registry, `/health`, `/v1/models`, non-stream + stream through the real `openai` SDK, SSE wire format, `max_tokens`/`max_completion_tokens`, multi-turn, content parts, 400s, client-disconnect regression, CLI one-shot + REPL against a live uvicorn |
 | `tests/test_kernel_e2e.py` | macOS + weights (skipped otherwise) | newest kernel: greedy output == HF transformers string, EOS stop, early close keeps the protocol in sync, multi-byte (emoji) detokenization, stream == non-stream via the server, too-long prompt → 400, CLI against the kernel, client disconnect mid-stream |
+| `tests/test_mlx_e2e.py` | mlx extra + MLX model (skipped otherwise) | MLX greedy output == HF string, stop-token usage convention, use from other threads and through the server, early close |
+| `../tests/test_launcher.py` | make (some tests) | Makefile and launcher list the same commands, `make help` (overall and per command), `args=` forwarded verbatim, unknown flags rejected, `new-kernel`, `--data-dir` reaches the tools, `smoke` with the fake runner |
