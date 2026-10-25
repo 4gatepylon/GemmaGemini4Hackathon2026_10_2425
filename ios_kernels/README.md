@@ -6,6 +6,7 @@ This is a sub-project of the broader effort. The goal is to make a more performa
 ```
 ios_kernels/                 a uv project (pyproject.toml): `uv sync` once
   PLAN.md                    design, decisions, roadmap, checklist
+  CLAUDE.md                  how to add a kernel (naming, lineage header), rules, checks
   kernels/                   one folder per model, then one immutable folder per engine version; newest is the default
     unsloth__Llama-3.2-1B-Instruct/
       kernel_metal_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
