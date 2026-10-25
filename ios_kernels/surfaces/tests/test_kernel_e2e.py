@@ -25,6 +25,10 @@ SKY_REFS = {
         "The sky appears blue because of a phenomenon called Rayleigh scattering, in which shorter "
         "wavelengths of light, such as blue and violet, are scattered more than longer wavelengths"
     ),
+    "google__gemma-4-E2B-it": (
+        "The sky appears blue because of a phenomenon called Rayleigh scattering, where shorter "
+        "wavelengths of sunlight (blue and violet) are scattered more effectively by the Earth's atmosphere"
+    ),
 }
 SKY_REF = SKY_REFS[kernel_dir.parent.name]
 

@@ -81,7 +81,7 @@ def bench_python() -> list:
 
 
 def cmd_setup(args, extra) -> int:
-    """One-time: build llama.cpp, convert weights (~7.5 GB into the data dir), build the kernel."""
+    """One-time: build llama.cpp, convert weights (~19 GB into the data dir), build the kernel."""
     return run([*bench_python(), HERE / "benchmarking/setup.py", "--kernel", kernel_dir(args.kernel)])
 
 

@@ -22,4 +22,5 @@ gitignored `.build/`.
 
 | folder | what | pp512 / tg128 (tok/s, M3 Pro) |
 |---|---|---|
-| `kernel_metal_f16_20261024-1620` | first MVP: hand-written Metal + Swift, Llama-3.2-1B FP16 | ~2050 / ~52–53 (llama.cpp: ~2650 / ~50–52) |
+| `google__gemma-4-E2B-it/kernel_metal_f16_20261025-1225` | first Gemma 4 E2B (text) kernel: hand-written Metal + Swift, FP16 | ~1120 / ~28 (llama.cpp: ~1120 / ~25–26) |
+| `unsloth__Llama-3.2-1B-Instruct/kernel_metal_f16_20261024-1620` | first MVP: hand-written Metal + Swift, Llama-3.2-1B FP16 | ~2050 / ~52–53 (llama.cpp: ~2650 / ~50–52) |

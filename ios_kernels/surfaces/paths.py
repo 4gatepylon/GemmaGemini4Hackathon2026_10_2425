@@ -8,15 +8,18 @@ IOS_KERNELS = Path(__file__).resolve().parents[1]  # .../ios_kernels
 REPO_ROOT = IOS_KERNELS.parent
 KERNELS_ROOT = IOS_KERNELS / "kernels"  # kernels/<model>/kernel_*, <model> = HF repo id with "/" -> "__"
 # The model every command uses by default. Kernels of other models are reachable with --kernel.
-MODEL = "unsloth__Llama-3.2-1B-Instruct"
+MODEL = "google__gemma-4-E2B-it"
 KERNELS_DIR = KERNELS_ROOT / MODEL
 # Large artifacts (weights, llama.cpp checkout). Gitignored; override with $DATA_DIR.
 DATA_DIR = Path(os.environ.get("DATA_DIR", REPO_ROOT / ".context"))
 MODELS_DIR = DATA_DIR / "models"
 LLAMA_DIR = DATA_DIR / "deps" / "llama.cpp"  # llama.cpp checkout + build (benchmark baseline)
 # Per model: baseline files in MODELS_DIR, made by benchmarking/setup.py from the same HF snapshot.
+# No "mlx" entry: mlx-lm loads the HF snapshot itself (bf16, same bytes per weight as fp16),
+# which saves a ~10 GB converted copy.
 BASELINES = {
     "unsloth__Llama-3.2-1B-Instruct": {"gguf": "llama1b_f16.gguf", "mlx": "llama1b_mlx_f16"},
+    "google__gemma-4-E2B-it": {"gguf": "gemma4_e2b_f16.gguf"},
 }
 
 
@@ -50,7 +53,9 @@ def load_manifest(kernel: Path) -> dict:
     return json.loads((kernel / "kernel.json").read_text())
 
 
-def baseline(kind: str, kernel: Path | None = None) -> Path:
-    """A baseline file ("gguf" or "mlx") for the model of `kernel` (default: MODEL)."""
+def baseline(kind: str, kernel: Path | None = None) -> Path | str:
+    """A baseline file ("gguf" or "mlx") for the model of `kernel` (default: MODEL). Without an
+    entry in BASELINES, the HF repo id itself (mlx-lm loads it from the HF cache)."""
     model = kernel.parent.name if kernel else MODEL
-    return MODELS_DIR / BASELINES[model][kind]
+    name = BASELINES[model].get(kind)
+    return MODELS_DIR / name if name else model.replace("__", "/", 1)
