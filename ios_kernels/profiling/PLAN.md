@@ -1,5 +1,14 @@
 # PLAN: profiling our Metal kernels vs llama.cpp
 
+> NOTE: this was written by: an earlier agent session (model and harness not recorded), landed in
+> commit 4df248c (#3). These two notes were added by Claude Opus 5.5 (`claude-opus-5-5`) in
+> Claude Code, Conductor workspace, 2026-10-24.
+
+> NOTE (stale): this plan predates the `kernels/` layout (#4, #5, #8). `../forward/` (and
+> `forward/main.swift`, `../forward/bench.sh`) no longer exist; the engine now lives in
+> `../kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/` (`main.swift`, `kernels.metal`) and
+> benchmarking in `../benchmarking/bench.sh`. Paths below have not been updated yet.
+
 **Goal:** a repeatable way to answer "where does the time go, and why?" for our
 hand-written Metal forward pass (`../forward/`), and the same question for
 llama.cpp's Metal backend, so the two can be compared kernel by kernel.
