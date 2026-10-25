@@ -125,7 +125,7 @@ slow outliers. An Instruments (xctrace) recording can attribute GPU time to proc
 
 ## Output format: `kprof/1`
 
-JSON with snake_case keys, defined in `lib/KProf.swift`:
+JSON with snake_case keys, defined in `lib/KProf.swift` (Swift) and `tools/kprof.py` (Python):
 
 - `meta`: tool, name, created, device (name, model, gpu_cores, ...), os, git (`sha[-dirty]`),
   argv, spec, and params (the resolved defines and vars).
@@ -136,3 +136,50 @@ JSON with snake_case keys, defined in `lib/KProf.swift`:
 - `counters`: time series (e.g. GPU util %), one track each.
 - `results`: aggregate rows, with n, median/mean/std/min/p10/p90 us per dispatch, gbps,
   gflops, pct_peak_bw, pct_peak_flops, and `method` (how the row was measured).
+
+## llama.cpp per-op baseline: `llama_ops.py`, `compare.py`
+
+llama.cpp's own op benchmark (`test-backend-ops perf`) times its Metal kernels one op at a
+time. `tools/llama_ops.py` drives it and converts the results to `kprof`, with the noise
+recorded by `knoise`:
+
+```sh
+uv run profiling/tools/llama_ops.py build              # test-backend-ops, test-export-graph-ops, llama-bench
+uv run profiling/tools/llama_ops.py export --model $DATA_DIR/models/llama1b_f16.gguf --ctx 512
+uv run profiling/tools/llama_ops.py mul-mat --shape 4096,1,4096 --shape 2048,512,2048
+uv run profiling/tools/llama_ops.py list $DATA_DIR/prof/llama_ops/mul_mat.txt
+uv run profiling/tools/llama_ops.py bench $DATA_DIR/prof/llama_ops/mul_mat.txt
+uv run profiling/tools/compare.py ours.json llama.json --labels ours,llama \
+    --pair "matvec=MUL_MAT mm_f16_4096x1x4096 f16 M=4096 N=1 K=4096"
+```
+
+- `build` builds the test tools from the shared llama.cpp checkout (`surfaces.paths.LLAMA_DIR`)
+  into its own build directory.
+- `export` writes the unique ops of the model's prompt-processing and token-generation graphs.
+  `--ctx` sets the KV length of the attention ops; without it, the model's full trained
+  context gets exported.
+- `mul-mat` writes test cases for arbitrary MUL_MAT shapes (f16/bf16/f32 weights). It reads the
+  op and type IDs from the build's `ggml.h`.
+- `bench` runs `test-backend-ops perf -b MTL0 --output sql` (the CSV output omits the timing
+  columns) and computes FLOPs for MUL_MAT. `--grep` filters rows, and `--op`/`--params` run
+  llama.cpp's built-in perf cases instead of a test file.
+- `compare.py A B` matches results by name (or `--pair` / `--map`) and prints the speedup
+  together with both files' methods and noise. `--md` gives a markdown table.
+
+**Read llama.cpp's numbers with its method in mind:**
+- *Cache-warm:* it averages many back-to-back runs of one op on the same buffers. When the
+  working set fits in the GPU's caches, that is faster than a real forward pass, where each
+  layer's weights are cold. `kbench --set ROT=1` gives the like-for-like number; the default
+  rotation gives the realistic one.
+- *Whole-tensor GB/s:* its bandwidth is (sum of the tensor sizes) / time, which is
+  meaningless for gathers and scatters (`GET_ROWS` from the embedding table, `SET_ROWS`
+  into the KV cache). Use the time for those.
+- *Launch floor:* decode-sized elementwise ops all sit at a few microseconds, which is the
+  per-op cost a fused kernel removes.
+
+### Noise around any command: `knoise`
+
+`profiling/.build/knoise [--out PATH] [--idle-ms MS] [--name NAME] -- COMMAND ...` runs the
+command and writes a `kprof` file with the same noise fields as `kbench`, a GPU-util counter
+track, and one event spanning the command. `llama_ops.py bench` uses it, and it works for
+`llama-bench`, our engine, or anything else.
