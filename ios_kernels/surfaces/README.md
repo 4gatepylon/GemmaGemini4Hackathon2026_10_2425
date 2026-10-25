@@ -4,28 +4,30 @@ An OpenAI-compatible server plus a terminal chat client on top of our kernels (o
 other backend). The design, extension points and limitations are in
 [DESIGN_AND_LIMITATIONS.md](DESIGN_AND_LIMITATIONS.md).
 
-All commands run from `ios_kernels/` (a uv project). Run `benchmarking/setup.sh` once first,
-to get the weights.
+All commands run from `ios_kernels/`. Run `make setup` once first, to get the weights. The
+`make` commands are shorthand for `ios_kernels_launcher.py` (see `make help`). The
+underlying `uv run openai-server` / `uv run cli-chat` entry points work too.
 
 ```sh
-uv sync                                   # first time only
-uv run openai-server                      # newest kernel on http://127.0.0.1:8000/v1
-uv run cli-chat                           # in another terminal: chat (/reset, /exit)
-uv run cli-chat --prompt "Why is the sky blue?"   # one-shot
+make serve                                 # newest kernel on http://127.0.0.1:8000/v1
+make chat                                  # in another terminal: chat (/reset, /exit)
+make ask args="why is the sky blue"        # one-shot
+make smoke                                 # start, ask one question, stop
 ```
 
 Other options:
 
 ```sh
-uv run openai-server --kernel 20261024-1620   # a specific kernel folder (substring match)
-uv run openai-server --runner fake            # canned echo replies: no GPU, no weights
-uv sync --extra mlx && uv run openai-server --runner mlx   # mlx-lm backend, to compare by hand
-uv run cli-chat --base-url http://127.0.0.1:8080/v1        # e.g. llama.cpp's llama-server
+make serve args="--kernel 20261024-1620"   # a specific kernel folder (substring match)
+make serve-fake                            # canned echo replies: no GPU, no weights
+make serve-mlx                             # mlx-lm backend, to compare by hand
+make serve-llamacpp                        # llama.cpp's llama-server on :8080 ...
+make chat args="--port 8080"               # ... and chat with it
 
 curl -s localhost:8000/v1/chat/completions -H 'content-type: application/json' \
   -d '{"messages":[{"role":"user","content":"Hi!"}],"max_tokens":64}'
 
-uv run pytest                              # API + CLI tests, and e2e kernel tests if weights exist
+make test                                  # API + CLI tests, and e2e kernel/MLX tests if weights exist
 ```
 
 Endpoints: `GET /health`, `GET /v1/models`, `POST /v1/chat/completions` (`stream`,

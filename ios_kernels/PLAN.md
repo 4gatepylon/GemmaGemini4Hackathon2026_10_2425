@@ -64,7 +64,7 @@ Generated artifacts (in `.context/models/`, ~2.5 GB each):
 - `llama1b_f16.gguf` (llama.cpp format, from `convert_hf_to_gguf.py --outtype f16`)
 - `llama1b_mlx_f16/` (MLX format, from `mlx_lm convert --dtype float16`)
 
-All of these are produced by `ios_kernels/benchmarking/setup.sh`.
+All of these are produced by `make setup` (`ios_kernels/benchmarking/setup.sh`).
 
 Optional downloads that would help (not blocking, tell me if you want them):
 - **Metal Toolchain** (`xcodebuild -downloadComponent MetalToolchain`, about 1 GB):
@@ -193,6 +193,9 @@ one level up as a `Runner` class. Details:
 
 ```
 ios_kernels/
+  Makefile                    <- shorthand for the launcher (`make help`)
+  ios_kernels_launcher.py     <- one entry point: setup, serve, chat, test, bench, new-kernel, ...
+  tests/test_launcher.py      <- launcher + Makefile tests
   PLAN.md                     <- this file
   README.md                   <- layout, quickstart, results
   pyproject.toml, uv.lock     <- uv project (surfaces + benchmarking deps)
@@ -243,6 +246,9 @@ ios_kernels/
 - [x] CLI chat client (`openai` SDK; REPL + one-shot; ttft and tok/s). Works against llama.cpp's `llama-server` too
 - [x] Tests: 24 pass (14 fake-runner API/CLI tests, 8 real-kernel e2e, 2 MLX e2e). Kernel and MLX greedy output == HF transformers text
 - [x] Fixed: a client disconnecting mid-stream left the runner locked (Starlette doesn't close sync generators). Regression tests added
+- [x] Milestone 3: `ios_kernels_launcher.py` (argparse subcommands, `--help` per command) + a `Makefile` that's pure shorthand for it (`make <command> args="--flags"`, `make help`)
+- [x] Fixed: `MLXRunner` failed under the server (MLX streams are per-thread). All MLX work now runs on one dedicated thread. Regression tests added
+- [x] Tests: 36 pass (+9 launcher/Makefile, +3 MLX threading/server)
 - [ ] (next) Protocol `cancel` message so abandoned streams stop immediately (they currently finish in the background)
 - [ ] (next) Prefill: flash-attention style kernel (GQA-shared K/V tiles), GEMM double-buffering / larger tiles
 - [ ] (next) Q8_0 weights + kernel, benchmark vs llama.cpp Q8_0
@@ -260,7 +266,7 @@ MVP done. On Llama-3.2-1B FP16, M3 Pro:
 Details are in README.md. Prefill gap breakdown: ~35 ms of 250 ms is naive
 attention, the rest is GEMM (~4.6 TFLOP/s).
 
-Manual testing: `uv run openai-server` + `uv run cli-chat` (about 48 tok/s
+Manual testing: `make serve` + `make chat` (about 48 tok/s
 streamed over HTTP, ~50 ms time-to-first-token).
 
 ## Roadblocks / risks (I'll update this as I go)

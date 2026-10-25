@@ -36,7 +36,8 @@ def reply(client: OpenAI, model: str, messages: list[dict], max_tokens: int, out
     elapsed = time.perf_counter() - t0
     n = usage.completion_tokens if usage else len(text)
     rate = (n - 1) / (elapsed - ttft) if ttft and n > 1 and elapsed > ttft else 0.0
-    out.write(f"\n[{n} tokens, ttft {1000 * (ttft or 0):.0f} ms, {rate:.1f} tok/s, finish={finish}]\n")
+    rate_s = f"{rate:.1f} tok/s" if n > 1 else "- tok/s"
+    out.write(f"\n[{n} tokens, ttft {1000 * (ttft or 0):.0f} ms, {rate_s}, finish={finish}]\n")
     return "".join(text)
 
 
