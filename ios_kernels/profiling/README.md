@@ -164,8 +164,12 @@ uv run profiling/tools/compare.py ours.json llama.json --labels ours,llama \
   context gets exported.
 - `mul-mat` writes test cases for arbitrary MUL_MAT shapes (f16/bf16/f32 weights). It reads the
   op and type IDs from the build's `ggml.h`.
+- `graph --model GGUF [--gen N | --prompt N]` records the ops llama.cpp actually dispatches for one
+  decode step or one prompt (`GGML_METAL_GRAPH_DEBUG=2`): fused ops appear once, with their shapes
+  and whether they run concurrently with the previous op.
 - `bench` runs `test-backend-ops perf -b MTL0 --output sql` (the CSV output omits the timing
-  columns) and computes FLOPs for MUL_MAT. `--grep` filters rows, and `--op`/`--params` run
+  columns) and computes FLOPs for MUL_MAT. `--runs N` runs it N times and keeps each op's fastest
+  run. `--grep` filters rows, and `--op`/`--params` run
   llama.cpp's built-in perf cases instead of a test file.
 - `compare.py A B` matches results by name (or `--pair` / `--map`) and prints the speedup
   together with both files' methods and noise. `--md` gives a markdown table.
@@ -180,6 +184,8 @@ uv run profiling/tools/compare.py ours.json llama.json --labels ours,llama \
   into the KV cache). Use the time for those.
 - *Launch floor:* decode-sized elementwise ops all sit at a few microseconds, which is the
   per-op cost a fused kernel removes.
+- *Host wall time:* each op's time is measured on the CPU around a graph compute, so CPU load
+  elsewhere inflates it (`kbench` reads GPU timestamps instead). `--runs 2` keeps the fastest.
 
 ### Noise around any command: `knoise`
 
@@ -333,3 +339,27 @@ only), so they come from Apple's tools:
   (saved once from the Instruments GUI, see `templates/README.md`), `xctrace_record.py` uses it,
   and `xctrace_export.py --counters` puts every counter sample in the `kprof` file's `counters`.
   `kviz.py perfetto` shows them as counter tracks under the GPU timeline.
+
+## The existing engine: `profile_engine.py`
+
+```sh
+uv run --extra profiling profiling/tools/profile_engine.py [--kernel NAME] [--gguf PATH] [--measure]
+```
+
+- **Ours:** replays the engine's own `kernels.metal` (the newest kernel folder through
+  `surfaces.paths`, or `--kernel`) with `engine/decode.json` (one token at `--pos`) and
+  `engine/prefill.json` (one `--t`-token chunk), at the engine's dispatch geometry and default
+  tunables, with cold per-layer weights. The kernel folder is only read (`kbench --source`).
+- **llama.cpp:** `llama_ops.py graph` records what llama.cpp dispatches for the same token and
+  chunk, `export` (at the same KV length) and `bench --runs 2` time each distinct op, and the
+  report multiplies each op's time by how often it runs.
+- **`--measure`:** also times the real engine binary and `llama-bench`, for whole-token numbers.
+- **Output** (`$DATA_DIR/prof/engine/<kernel>/`): `report.md` with one table per phase (time and
+  dispatch count per category, ours vs llama.cpp, via `engine/categories.json`), the totals,
+  method notes and noise; the `kprof` files; and charts of our run.
+
+Reading the report: our replay's whole-token time should match the real engine, which validates
+the replay. llama.cpp's column is a sum of isolated op times: host wall time, cache-warm (small
+weight matrices look faster than inside a real token), unfused, and without overlap between ops.
+Compare categories with that in mind, and anchor on the whole-token measurements. The specs encode
+one model's shapes in `vars`; another model needs its own specs.

@@ -5,6 +5,7 @@
   llama_ops.py export  --model GGUF [--ctx N] [--out OPS.txt]   the model's unique graph ops (pp and tg graphs)
   llama_ops.py mul-mat --shape M,N,K [...] [--type f16] [--out OPS.txt]   custom MUL_MAT cases
   llama_ops.py list    OPS.txt                          human-readable listing of a test file
+  llama_ops.py graph   --model GGUF [--prompt N | --gen N] [--out JSON]   the ops llama.cpp dispatches per graph
   llama_ops.py bench   OPS.txt [--grep REGEX] [--out JSON] [--name NAME]
   llama_ops.py bench   --op MUL_MAT [--params REGEX]    llama.cpp's built-in perf cases instead
 
@@ -19,12 +20,14 @@ Locations: --src/$LLAMA_SRC (default: the shared checkout, surfaces.paths.LLAMA_
 """
 
 import argparse
+import json
 import os
 import re
 import sqlite3
 import subprocess
 import sys
 import tempfile
+from collections import defaultdict
 from pathlib import Path
 
 import kprof
@@ -210,30 +213,41 @@ def cmd_bench(args):
     if not knoise.exists():
         sys.exit(f"{knoise} not found: run `uv run profiling/build.py`")
     name = args.name or (Path(args.file).stem if args.file else args.op)
-    with tempfile.TemporaryDirectory() as tmp:
-        noise_path = Path(tmp) / "noise.json"
-        print(f"running: {' '.join(cmd)}", file=sys.stderr)
-        r = subprocess.run(
-            [str(knoise), "--out", str(noise_path), "--name", "test-backend-ops", "--", *cmd],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL if not args.verbose else None,
-            text=True,
-        )
-        if r.returncode != 0:
-            sys.exit(f"test-backend-ops failed (exit {r.returncode})")
-        k = kprof.load(noise_path)
-
-    # stdout is SQL, but keep only the statements in case anything else gets printed there
-    create = re.findall(r"(?s)CREATE TABLE.*?\);", r.stdout)[:1]
-    inserts = re.findall(r"^INSERT INTO .*;$", r.stdout, re.M)
-    if not create:
-        sys.exit("test-backend-ops printed no SQL (try --verbose)")
-    db = sqlite3.connect(":memory:")
-    db.executescript("\n".join(create + inserts))
-    rows = db.execute(
-        "SELECT op_name, op_params, time_us, bandwidth_gb_s, memory_kb, n_runs, build_commit, supported "
-        "FROM test_backend_ops WHERE test_mode = 'perf'"
-    ).fetchall()
+    # test-backend-ops times host wall clock around each graph (CPU encode + GPU), so CPU load
+    # elsewhere inflates it. With --runs N it runs N times and keeps each op's fastest run.
+    by_key, order = {}, []
+    for i in range(args.runs):
+        with tempfile.TemporaryDirectory() as tmp:
+            noise_path = Path(tmp) / "noise.json"
+            print(f"running ({i + 1}/{args.runs}): {' '.join(cmd)}", file=sys.stderr)
+            r = subprocess.run(
+                [str(knoise), "--out", str(noise_path), "--name", "test-backend-ops", "--", *cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL if not args.verbose else None,
+                text=True,
+            )
+            if r.returncode != 0:
+                sys.exit(f"test-backend-ops failed (exit {r.returncode})")
+            if i == 0:
+                k = kprof.load(noise_path)
+        # stdout is SQL, but keep only the statements in case anything else gets printed there
+        create = re.findall(r"(?s)CREATE TABLE.*?\);", r.stdout)[:1]
+        inserts = re.findall(r"^INSERT INTO .*;$", r.stdout, re.M)
+        if not create:
+            sys.exit("test-backend-ops printed no SQL (try --verbose)")
+        db = sqlite3.connect(":memory:")
+        db.executescript("\n".join(create + inserts))
+        for row in db.execute(
+            "SELECT op_name, op_params, time_us, bandwidth_gb_s, memory_kb, n_runs, build_commit, supported "
+            "FROM test_backend_ops WHERE test_mode = 'perf'"
+        ):
+            key = (row[0], row[1])
+            if key not in by_key:
+                order.append(key)
+                by_key[key] = row
+            elif row[2] is not None and (by_key[key][2] is None or row[2] < by_key[key][2]):
+                by_key[key] = row
+    rows = [by_key[key] for key in order]
     pk = kprof.peaks(args.peaks)
     grep = re.compile(args.grep) if args.grep else None
     results, commit = [], ""
@@ -258,7 +272,8 @@ def cmd_bench(args):
             "flops": flops,
             "gbps": gbps,
             "gflops": flops / (us * 1e3) if flops else None,
-            "method": f"test-backend-ops perf: mean over {n_runs} back-to-back runs of one op on the same buffers",
+            "method": f"test-backend-ops perf: host wall time, mean over {n_runs} back-to-back runs of one op on the "
+            f"same buffers (fastest of {args.runs} invocation(s))",
             "extra": {"op": op, "params": params},
         }
         results.append(kprof.add_roof_pct(res, pk))
@@ -298,6 +313,69 @@ def cmd_bench(args):
     print(f"wrote {out}")
 
 
+NODE = re.compile(r"node\[\s*\d+\] - (\S+)\s+(.*?)\s*(\(concurrent\))?\s*$")
+TENSOR = re.compile(r"(src\d|node) -\s+(\w+) \[([\d,\s]+)\]")
+
+
+def base_name(name):
+    """'Qcur-12' -> 'Qcur', 'cache_k_l3 (view)' -> 'cache_k_l', 'node_117' -> 'node'."""
+    n = re.sub(r"\s*\(.*?\)", "", name).strip()
+    return re.sub(r"[-_]?\d+$", "", n)
+
+
+def cmd_graph(args):
+    """Run llama-bench once with GGML_METAL_GRAPH_DEBUG=2 and record the last graph's dispatched ops
+    (fused ops appear once; views/reshapes are skipped), with shapes and concurrency."""
+    gen, prompt = (0, args.prompt) if args.prompt else (args.gen, 0)
+    cmd = [str(tool(args, "llama-bench")), "-m", args.model, "-p", str(prompt), "-n", str(gen), "-r", "1", "-ngl", "99"]
+    cmd.append("-v")
+    env = {**os.environ, "GGML_METAL_GRAPH_DEBUG": "2"}
+    r = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"llama-bench failed: {r.stderr[-2000:]}")
+    graphs, cur, op = [], [], None
+    for line in (r.stdout + r.stderr).splitlines():
+        if "ggml_metal_op_encode_impl:" not in line:
+            continue
+        if (m := NODE.search(line)) and "(noop)" not in line:
+            op = {"op": m.group(1), "name": m.group(2).strip(), "concurrent": bool(m.group(3)), "srcs": []}
+            op["base"] = base_name(op["name"])
+            cur.append(op)
+        elif op and (t := TENSOR.search(line)):
+            ne = [int(x) for x in t.group(3).split(",")]
+            if t.group(1) == "node":
+                op["type"], op["ne"] = t.group(2), ne
+                if op["op"] == "MUL_MAT" and op["base"] == "result_output":  # the last op of a graph
+                    graphs.append(cur)
+                    cur, op = [], None
+            else:
+                op["srcs"].append({"type": t.group(2), "ne": ne})
+    if not graphs:
+        sys.exit("no graph found in llama-bench's debug output (is this a Metal build?)")
+    ops = graphs[-1]
+    kind = "pp" if prompt else "tg"
+    fa = [o for o in ops if o["op"] == "FLASH_ATTN_EXT" and len(o["srcs"]) > 1]
+    n_kv = fa[0]["srcs"][1]["ne"][1] if fa else None
+    out = Path(args.out or kprof.PROF_DIR / "llama_ops" / f"{Path(args.model).stem}-{kind}{prompt or gen}-graph.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps({"model": args.model, "graph": kind, "tokens": prompt or gen, "n_kv": n_kv, "ops": ops}, indent=1)
+    )
+    counts = defaultdict(int)
+    for o in ops:
+        counts[(o["op"], o["base"])] += 1
+    print(
+        f"{kind} graph: {len(ops)} dispatched ops ({sum(o['concurrent'] for o in ops)} marked concurrent), "
+        f"attention over {n_kv} KV slots"
+    )
+    print(
+        kprof.table(
+            ["op", "name", "count"], [[k[0], k[1], v] for k, v in sorted(counts.items(), key=lambda kv: -kv[1])]
+        )
+    )
+    print(f"wrote {out}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
@@ -318,6 +396,11 @@ def main():
     m.add_argument("--out")
     li = sub.add_parser("list")
     li.add_argument("file")
+    gr = sub.add_parser("graph")
+    gr.add_argument("--model", required=True)
+    gr.add_argument("--gen", type=int, default=1, help="decode graph for this many tokens (default 1)")
+    gr.add_argument("--prompt", type=int, help="prompt-processing graph of this many tokens instead")
+    gr.add_argument("--out")
     b = sub.add_parser("bench")
     b.add_argument("file", nargs="?")
     b.add_argument("--op")
@@ -327,10 +410,16 @@ def main():
     b.add_argument("--name")
     b.add_argument("--peaks")
     b.add_argument("--verbose", action="store_true")
+    b.add_argument("--runs", type=int, default=1, help="run test-backend-ops N times and keep each op's fastest")
     args = ap.parse_args()
-    {"build": cmd_build, "export": cmd_export, "mul-mat": cmd_mul_mat, "list": cmd_list, "bench": cmd_bench}[args.cmd](
-        args
-    )
+    {
+        "build": cmd_build,
+        "export": cmd_export,
+        "mul-mat": cmd_mul_mat,
+        "list": cmd_list,
+        "graph": cmd_graph,
+        "bench": cmd_bench,
+    }[args.cmd](args)
 
 
 if __name__ == "__main__":

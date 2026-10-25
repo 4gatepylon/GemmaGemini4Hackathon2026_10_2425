@@ -1,0 +1,27 @@
+{
+  "order": ["embedding", "norms", "QKV projection", "RoPE + KV write", "attention", "casts",
+            "output projection", "residual adds", "gate/up + SwiGLU", "down projection", "LM head",
+            "sampling", "other"],
+  "ours": {
+    "embed": "embedding", "attn_norm": "norms", "ffn_norm": "norms", "final_norm": "norms",
+    "qkv": "QKV projection", "rope_kv": "RoPE + KV write", "attention": "attention", "to_half": "casts",
+    "wo": "output projection", "gate_up": "gate/up + SwiGLU", "down": "down projection",
+    "lm_head": "LM head", "argmax": "sampling"
+  },
+  "llama": [
+    {"op": "GET_ROWS", "name": "^embd$", "category": "embedding"},
+    {"op": "RMS_NORM|MUL", "category": "norms"},
+    {"op": "MUL_MAT", "name": "^(Qcur|Kcur|Vcur)$", "category": "QKV projection"},
+    {"op": "ROPE|SET_ROWS", "category": "RoPE + KV write"},
+    {"op": "FLASH_ATTN_EXT|SOFT_MAX", "category": "attention"},
+    {"op": "CPY|DUP", "category": "casts"},
+    {"op": "MUL_MAT", "name": "^attn_out$", "category": "output projection"},
+    {"op": "ADD", "category": "residual adds"},
+    {"op": "MUL_MAT", "name": "^(ffn_gate|ffn_up)$", "category": "gate/up + SwiGLU"},
+    {"op": "GLU", "category": "gate/up + SwiGLU"},
+    {"op": "MUL_MAT", "name": "^ffn_out$", "category": "down projection"},
+    {"op": "MUL_MAT", "name": "^result_output$", "category": "LM head"},
+    {"op": "ARGMAX", "category": "sampling"},
+    {"op": ".*", "category": "other"}
+  ]
+}

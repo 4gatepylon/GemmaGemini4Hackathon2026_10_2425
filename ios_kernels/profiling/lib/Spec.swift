@@ -42,6 +42,10 @@ enum BindValue {
     case bytes([UInt8])             // setBytes: scalars and packed structs
 }
 
+enum Phase: String {
+    case pre, loop, post
+}
+
 enum Dispatch: CustomStringConvertible {
     case threadgroups(MTLSize, threadsPerGroup: MTLSize)
     case threads(MTLSize, threadsPerGroup: MTLSize)
@@ -59,6 +63,7 @@ struct StepSpec {
     let name: String
     let kernel: String
     let group: String?              // optional nesting level for charts, e.g. "attention"
+    let phase: Phase                // with a `loop`: run once before it, inside it, or once after it
     let binds: [BindValue]
     let threadgroupMemory: [Int]    // bytes per threadgroup-memory index
     let dispatch: Dispatch
@@ -70,7 +75,7 @@ struct StepSpec {
 struct ResolvedSpec {
     let name: String
     let description: String?
-    let sourcePath: String
+    var sourcePath: String
     let defines: [(String, String)]
     let vars: [String: Double]
     let buffers: [BufferSpec]
@@ -267,7 +272,11 @@ final class BenchSpec {
             else if let g = s["grid"] { dispatch = .threads(try size3(g, "step \(sname).grid"), threadsPerGroup: tpg) }
             else { throw fail("step \(sname) needs threadgroups or grid") }
             let tgm = try (s["threadgroup_memory"] as? [Any] ?? []).enumerated().map { try int($0.element, "step \(sname).threadgroup_memory[\($0.offset)]") }
-            steps.append(StepSpec(name: sname, kernel: kernel, group: s["group"] as? String, binds: binds, threadgroupMemory: tgm, dispatch: dispatch,
+            guard let phase = Phase(rawValue: s["phase"] as? String ?? "loop") else {
+                throw fail("step \(sname).phase must be pre, loop or post")
+            }
+            steps.append(StepSpec(name: sname, kernel: kernel, group: s["group"] as? String, phase: phase,
+                                  binds: binds, threadgroupMemory: tgm, dispatch: dispatch,
                                   bytes: try num(s["bytes"], "step \(sname).bytes"),
                                   flops: try num(s["flops"], "step \(sname).flops"),
                                   repeatCount: try int(s["repeat"], "step \(sname).repeat", default: 1)))

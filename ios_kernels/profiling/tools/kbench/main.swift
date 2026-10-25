@@ -45,18 +45,20 @@ struct Options {
     var resetPeaks = false
     var capture: String?
     var warmupMs = 200
+    var source: String?
 }
 
 let usage = """
 usage: kbench SPEC.json [--set NAME=VALUE]... [--sweep NAME=V1,V2,...]... [--reps N] [--warmup N]
                         [--warmup-ms MS] [--out PATH] [--peaks PATH] [--reset-peaks] [--capture PATH.gputrace]
-                        [--idle-ms MS] [--no-noise] [--list]
+                        [--source PATH.metal] [--idle-ms MS] [--no-noise] [--list]
   --set NAME=VALUE      override a define or var of the spec (repeatable, applies to every variant)
   --sweep NAME=V1,V2    run once per value (repeatable: cartesian product, replaces the spec's sweep)
   --warmup-ms MS        keep warming up until this much time has passed (default 200; GPU clock ramp-up)
   --out PATH            kprof JSON output (default $DATA_DIR/prof/kbench/<name>-<time>.json)
   --peaks PATH          measured roofline peaks (default $DATA_DIR/prof/peaks.json)
   --reset-peaks         let a roofline spec overwrite peaks even if lower (default: keep the best)
+  --source PATH         use this .metal file instead of the spec's source (e.g. a kernel folder's kernels.metal)
   --capture PATH        also write a GPU capture (.gputrace) of one rep of the first variant, for Xcode
   --idle-ms MS          GPU-utilization baseline window before the run (default 1000)
   --no-noise            skip noise recording
@@ -88,6 +90,7 @@ func parseOptions() -> Options {
         case "--list": o.list = true
         case "--reset-peaks": o.resetPeaks = true
         case "--capture": o.capture = next(a)
+        case "--source": o.source = next(a)
         case "-h", "--help": print(usage); exit(0)
         default:
             if a.hasPrefix("-") || !o.spec.isEmpty { die("unexpected argument \(a)\n\(usage)") }
@@ -163,7 +166,9 @@ struct VariantOutcome {
 func runVariant(_ spec: ResolvedSpec, device: MTLDevice, queue: MTLCommandQueue, prof: RegionProfiler,
                 reps: Int, warmup: Int, warmupMs: Int, stackPrefix: [String], capture: String?) -> VariantOutcome {
     // Compile: tunables are injected as #defines in front of the source (as the kernels in ../../kernels/ do).
-    guard var src = try? String(contentsOfFile: spec.sourcePath, encoding: .utf8) else { die("cannot read \(spec.sourcePath)") }
+    guard var src = try? String(contentsOfFile: spec.sourcePath, encoding: .utf8) else {
+        die("cannot read \(spec.sourcePath) (pass --source PATH to use another .metal file)")
+    }
     src = spec.defines.map { "#define \($0.0) \($0.1)\n" }.joined() + src
     let copts = MTLCompileOptions()
     copts.mathMode = spec.fastMath ? .fast : .safe
@@ -228,12 +233,18 @@ func runVariant(_ spec: ResolvedSpec, device: MTLDevice, queue: MTLCommandQueue,
 
     enum Pass { case warmup, steps, whole }
     let loopCount = spec.loop?.count ?? 1
+    // Execution order of one rep: `pre` steps, the `loop` steps loopCount times, `post` steps.
+    let idx = spec.steps.indices
+    let plan: [(step: Int, iter: Int?)] = idx.filter { spec.steps[$0].phase == .pre }.map { ($0, nil) }
+        + (0..<loopCount).flatMap { it in idx.filter { spec.steps[$0].phase == .loop }.map { ($0, Optional(it)) } }
+        + idx.filter { spec.steps[$0].phase == .post }.map { ($0, nil) }
+    func runsPerRep(_ s: StepSpec) -> Int { s.phase == .loop ? loopCount : 1 }
     func stepBytes(_ s: StepSpec) -> Double? { s.bytes.map { $0 * Double(s.repeatCount) } }
     func stepFlops(_ s: StepSpec) -> Double? { s.flops.map { $0 * Double(s.repeatCount) } }
     let wholeBytes = spec.steps.allSatisfy { $0.bytes != nil }
-        ? spec.steps.map { stepBytes($0)! }.reduce(0, +) * Double(loopCount) : nil
+        ? spec.steps.map { stepBytes($0)! * Double(runsPerRep($0)) }.reduce(0, +) : nil
     let wholeFlops = spec.steps.contains { $0.flops != nil }
-        ? spec.steps.map { stepFlops($0) ?? 0 }.reduce(0, +) * Double(loopCount) : nil
+        ? spec.steps.map { (stepFlops($0) ?? 0) * Double(runsPerRep($0)) }.reduce(0, +) : nil
 
     /// `.steps`: every step is its own timed region (nested rep > loop iteration > group > step).
     /// `.whole`: the entire rep is one timed encoder, like a real engine encodes a token.
@@ -249,27 +260,26 @@ func runVariant(_ spec: ResolvedSpec, device: MTLDevice, queue: MTLCommandQueue,
             if pass == .whole {
                 let enc = prof.makeEncoder(cb, name: "whole", stack: stackPrefix + ["whole \(rep)"], track: "GPU (whole)",
                                            bytes: wholeBytes, flops: wholeFlops, variant: spec.variant)
-                for _ in 0..<loopCount { for si in spec.steps.indices { encode(enc, step: si) } }
+                for p in plan { encode(enc, step: p.step) }
                 prof.end(enc)
             } else {
-                for it in 0..<loopCount {
-                    for (si, s) in spec.steps.enumerated() {
-                        if pass == .warmup {
-                            let enc = cb.makeComputeCommandEncoder()!
-                            encode(enc, step: si)
-                            enc.endEncoding()
-                            continue
-                        }
-                        var stack = stackPrefix + ["rep \(rep)"]
-                        if let l = spec.loop { stack.append("\(l.name) \(it)") }
-                        if let g = s.group { stack.append(g) }
-                        stack.append(s.name)
-                        let enc = prof.makeEncoder(cb, name: s.name, kernel: s.kernel, stack: stack,
-                                                   bytes: stepBytes(s), flops: stepFlops(s), variant: spec.variant,
-                                                   args: ["repeat": String(s.repeatCount)])
+                for (si, it) in plan {
+                    let s = spec.steps[si]
+                    if pass == .warmup {
+                        let enc = cb.makeComputeCommandEncoder()!
                         encode(enc, step: si)
-                        prof.end(enc)
+                        enc.endEncoding()
+                        continue
                     }
+                    var stack = stackPrefix + ["rep \(rep)"]
+                    if let l = spec.loop, let it { stack.append("\(l.name) \(it)") }
+                    if let g = s.group { stack.append(g) }
+                    stack.append(s.name)
+                    let enc = prof.makeEncoder(cb, name: s.name, kernel: s.kernel, stack: stack,
+                                               bytes: stepBytes(s), flops: stepFlops(s), variant: spec.variant,
+                                               args: ["repeat": String(s.repeatCount)])
+                    encode(enc, step: si)
+                    prof.end(enc)
                 }
             }
             cb.commit()
@@ -316,17 +326,17 @@ func runVariant(_ spec: ResolvedSpec, device: MTLDevice, queue: MTLCommandQueue,
         let w = events.filter { $0.track == "GPU (whole)" }.map { Double($0.durNs) / 1e3 }
         if !w.isEmpty {
             let st = Summary(w)
-            let sumSteps = zip(spec.steps, results).map { $1.medianUs * Double($0.repeatCount) * Double(loopCount) }.reduce(0, +)
+            let sumSteps = zip(spec.steps, results).map { $1.medianUs * Double($0.repeatCount * runsPerRep($0)) }.reduce(0, +)
             results.append(KProf.Result(
                 name: "whole", variant: spec.variant,
-                method: "kbench: \(st.n) reps, the whole rep (\(loopCount) x \(spec.steps.count) steps) in one encoder, no per-step timestamps",
+                method: "kbench: \(st.n) reps, the whole rep (\(plan.count) step runs) in one encoder, no per-step timestamps",
                 n: st.n, medianUs: st.median, meanUs: st.mean, stdUs: st.std, minUs: st.min, p10Us: st.p10, p90Us: st.p90,
                 bytes: wholeBytes, flops: wholeFlops,
                 gbps: wholeBytes.map { $0 / (st.median * 1e3) }, gflops: wholeFlops.map { $0 / (st.median * 1e3) },
                 pctPeakBw: nil, pctPeakFlops: nil,
                 extra: ["sum_of_steps_us": String(format: "%.2f", sumSteps)]))
             pipelineLine = String(format: "pipeline: whole rep %.1f us as one encoder; sum of split steps %.1f us (%+.1f%% from splitting into %d timed encoders)",
-                                  st.median, sumSteps, 100 * (sumSteps - st.median) / st.median, loopCount * spec.steps.count)
+                                  st.median, sumSteps, 100 * (sumSteps - st.median) / st.median, plan.count)
         }
     }
     return VariantOutcome(events: events, results: results, pipelineLine: pipelineLine, pipelineStats: stats)
@@ -343,7 +353,9 @@ do { benchSpec = try BenchSpec(path: opts.spec) } catch { die("\(error)") }
 let specs: [ResolvedSpec]
 do {
     specs = try benchSpec.variants(cliSweeps: opts.sweeps).map {
-        try benchSpec.resolve(overrides: opts.sets + $0.sets, label: $0.label)
+        var s = try benchSpec.resolve(overrides: opts.sets + $0.sets, label: $0.label)
+        if let src = opts.source { s.sourcePath = (src as NSString).standardizingPath }
+        return s
     }
 } catch { die("\(error)") }
 let first = specs[0]
