@@ -1,5 +1,7 @@
 # PLAN: hand-written Metal forward pass vs llama.cpp
 
+> As of: main @ dd8c5c5, 2026-10-24 14:00 PDT
+
 **Goal (MVP):** get a working, from-scratch LLM inference runtime prototype on
 Apple GPUs (custom Metal compute kernels, Swift host so it ports to iOS) as
 fast as possible, verify it's numerically correct, and benchmark it against

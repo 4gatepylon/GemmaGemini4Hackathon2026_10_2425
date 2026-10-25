@@ -73,7 +73,7 @@ The first thing in every kernel's `README.md`, after the `# <folder name>` title
 kernel: kernel_<name>_<YYYYMMDD-HHMM>   # this folder's name
 model: <model folder name>
 origin: root | derived                # root = written from scratch
-parent: none | kernel_<name>_<YYYYMMDD-HHMM>   # folder this was copied from (same model, unless noted)
+parent: none | kernel_<name>_<YYYYMMDD-HHMM>   # older folder in the same model folder it was copied from
 change: <one line: what is new vs parent (root: what it is)>
 ```
 ````
@@ -101,9 +101,12 @@ grep -rl '^parent: kernel_metal_f16_20261024-1620$' kernels/*/*/README.md   # ch
 - **Docs are written in present tense and built not to go stale quickly**: describe what is
   and point to the source of truth (code, `kernel.json`, scripts) instead of copying volatile
   details like numbers, file lists, or status. Anything only in the scope of one conversation
-  (what was just tried, fixed, or discussed) does not go in docs. Exceptions: `PLAN.md` and
-  `DESIGN_AND_LIMITATIONS.md` files are working notes for agents in the loop and can hold plans,
-  status, and history.
+  (what was just tried, fixed, or discussed) does not go in docs. Exceptions: `PLAN.md`,
+  `DESIGN_AND_LIMITATIONS.md`, and `KNOWN_ISSUES.md` files are working notes for agents in the loop
+  and can hold plans, status, and history. Because they go stale, each one has, right under its
+  `# <title>` line, the `main` commit and the time (to the minute) its content was last checked
+  against: `> As of: main @ <short hash>, <YYYY-MM-DD HH:MM TZ>`. Update that line whenever you
+  edit the file (the commit your edit is based on, and the current time).
 - **Scripts are Python, runnable with `uv run`** (deps in `pyproject.toml`), never bash.
 - **Keep changes minimal** and match the surrounding style.
 
@@ -113,15 +116,31 @@ Small standalone helper scripts, run from `ios_kernels/` with `uv run utils/<scr
 New utility scripts go here.
 
 - `kernel_lineage.py`: kernel lineage, one tree per model (from each README's `parent:` line).
+- `check_*.py`: the CI checks (see CI below); run them locally before pushing.
 
 ## Checks
 
 From `ios_kernels/`:
-- `uv run ruff check .`: lint (config in `pyproject.toml`). Must be clean. `ruff format` is not used.
+- `uv run ruff check .` and `uv run ruff format --check .`: lint and format (config in
+  `pyproject.toml`). Both must be clean; `uv run ruff format .` fixes formatting.
 - `uv run pytest`: unit tests always run. Kernel e2e tests need `.context/models/*.bin`
   (run `uv run --extra bench benchmarking/setup.py`) and compare exact greedy output against HF.
 - `uv run --extra bench python benchmarking/reference.py --kernel <name>`: logits/tokens vs HF.
 - `uv run --extra bench benchmarking/bench.py --kernel <name>`: pp512 / tg128 vs llama.cpp and MLX.
+
+## CI (GitHub Actions)
+
+`.github/workflows/ci.yml` runs on every PR and push to `main`. **Every job must pass to merge.**
+**Never modify, disable, or work around the workflow or the `utils/check_*.py` scripts** (and never
+`git push --no-verify` around them); if a check looks wrong, stop and tell the user.
+
+| job | what must hold | run locally (from `ios_kernels/`) |
+|---|---|---|
+| ruff | lint and format are clean | `uv run ruff check . && uv run ruff format --check .` |
+| kernel tree | `kernels/` matches "Adding a kernel" and the header schema above | `uv run utils/check_kernel_tree.py` |
+| no shell scripts | no shell scripts anywhere in the repo (by extension or shebang) | `uv run utils/check_no_shell_scripts.py` |
+| forbidden markers | no do-not-submit marker or its three-letter abbreviation (case-insensitive substring, exact strings in `utils/check_forbidden_markers.py`) in lines added or commit messages since `main`, or in the PR title/body | `uv run utils/check_forbidden_markers.py` |
+| pytest | `uv run pytest` passes (macOS runner, no weights, so kernel e2e tests skip) | `uv run pytest` |
 
 ## PRs
 

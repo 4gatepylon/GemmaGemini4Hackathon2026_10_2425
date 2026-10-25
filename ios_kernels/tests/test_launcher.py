@@ -1,9 +1,13 @@
 """ios_kernels_launcher.py + Makefile: the Makefile stays a pure shorthand for the launcher."""
 
+import contextlib
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -107,3 +111,21 @@ def test_data_dir_flag_reaches_tools(tmp_path):
 def test_smoke_with_fake_runner(capfd):
     assert launcher.main(["smoke", "--runner", "fake", "--prompt", "ping pong"]) == 0
     assert "Echo: ping pong" in capfd.readouterr().out
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP], ids=lambda s: s.name)
+def test_signal_to_launcher_stops_the_server(sig):
+    # `kill <pid>` or an IDE's stop button signals only the launcher; the server it started must stop too.
+    port = launcher.free_port()
+    url = f"http://127.0.0.1:{port}/health"
+    cmd = [sys.executable, HERE / "ios_kernels_launcher.py", "serve-fake", "--port", str(port)]
+    p = subprocess.Popen(cmd, cwd=HERE, start_new_session=True)  # own process group, for the cleanup below
+    try:
+        launcher.wait_for_health(url, timeout=60, proc=p)
+        p.send_signal(sig)
+        p.wait(timeout=20)
+        with pytest.raises(OSError):
+            urllib.request.urlopen(url, timeout=1)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(p.pid, signal.SIGKILL)  # anything left over, so a failure doesn't leak a server
