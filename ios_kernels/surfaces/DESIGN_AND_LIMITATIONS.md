@@ -21,7 +21,7 @@ being able to swap kernels or runtimes over throughput or features.
            └──────────┬───────────┴────────────────┴────────────────┘
                       │  JSON lines over stdin/stdout ("--serve protocol")
                       ▼
- kernels/kernel_<name>_<YYYYMMDD-HHMM>/.build/llm   (Swift + Metal, token ids only)
+ kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/.build/llm   (Swift + Metal, token ids only)
 ```
 
 There are two seams. They are the only places that need to stay stable:
@@ -56,7 +56,8 @@ There are two seams. They are the only places that need to stay stable:
 
 ### A new kernel version (most common)
 1. `make new-kernel args=<name>` copies the newest folder to
-   `kernels/kernel_<name>_<YYYYMMDD-HHMM>/`. Change the copy.
+   `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/` and fills in its README lineage header
+   (see `../CLAUDE.md`). Change the copy.
 2. Keep the contract (below). If the weight format changes, point `kernel.json`
    `weights` at a new file name and update its `convert_weights.py`.
 3. `make setup` converts the weights and builds the binary. `make serve` now uses it

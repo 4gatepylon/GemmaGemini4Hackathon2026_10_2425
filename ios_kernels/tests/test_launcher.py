@@ -61,17 +61,30 @@ def test_kernels_marks_newest_as_default(capsys):
 
 
 def test_new_kernel_copies_without_build_output(tmp_path):
-    src = tmp_path / "kernel_a_20260101-0000"
+    model_dir = tmp_path / "org__Model"
+    src = model_dir / "kernel_a_20260101-0000"
     (src / ".build").mkdir(parents=True)
     (src / ".build" / "llm").write_text("binary")
     (src / "kernel.json").write_text("{}")
-    dst = launcher.new_kernel("metal_q8", src, tmp_path, now=datetime(2026, 10, 24, 17, 5))
+    (src / "README.md").write_text("# kernel_a_20260101-0000\n\n```yaml\nkernel: kernel_a_20260101-0000\n"
+                                   "model: org__Model\norigin: root\nparent: none\nchange: first\n```\n\nBody.\n")
+    dst = launcher.new_kernel("metal_q8", src, model_dir, now=datetime(2026, 10, 24, 17, 5))
     assert dst.name == "kernel_metal_q8_20261024-1705"
     assert (dst / "kernel.json").exists() and not (dst / ".build").exists()
+    # Lineage header (CLAUDE.md schema) now describes the copy, and the body is kept.
+    assert (dst / "README.md").read_text() == (
+        "# kernel_metal_q8_20261024-1705\n\n```yaml\nkernel: kernel_metal_q8_20261024-1705\nmodel: org__Model\n"
+        "origin: derived\nparent: kernel_a_20260101-0000\nchange: TODO: one line, what is new vs parent\n```\n\nBody.\n")
     with pytest.raises(SystemExit, match="already exists"):
-        launcher.new_kernel("metal_q8", src, tmp_path, now=datetime(2026, 10, 24, 17, 5))
+        launcher.new_kernel("metal_q8", src, model_dir, now=datetime(2026, 10, 24, 17, 5))
     with pytest.raises(SystemExit, match="bad name"):
-        launcher.new_kernel("Bad-Name", src, tmp_path)
+        launcher.new_kernel("Bad-Name", src, model_dir)
+
+
+def test_new_kernel_header_matches_real_kernel_readme():
+    # The header regex must match the format the real kernels use (CLAUDE.md schema).
+    text = (launcher.paths().list_kernels()[-1] / "README.md").read_text()
+    assert re.match(r"# [^\n]*\n+```yaml\n.*?\n```\n", text, re.S)
 
 
 def test_data_dir_flag_reaches_tools(tmp_path):

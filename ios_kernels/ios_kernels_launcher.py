@@ -209,27 +209,38 @@ def cmd_kernels(args, extra) -> int:
 
 
 def new_kernel(name: str, src: Path, kernels_dir: Path, now: datetime | None = None) -> Path:
+    """Copy `src` to kernels_dir/kernel_<name>_<YYYYMMDD-HHMM>/ and point its README lineage
+    header (schema in CLAUDE.md) at the new folder, with `src` as the parent."""
     if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", name):
         raise SystemExit(f"bad name {name!r}: use lowercase letters, digits and underscores")
     dst = kernels_dir / f"kernel_{name}_{(now or datetime.now()).strftime('%Y%m%d-%H%M')}"
     if dst.exists():
         raise SystemExit(f"{dst.name} already exists")
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".build", "__pycache__"))
+
+    readme = dst / "README.md"
+    header = (f"# {dst.name}\n\n```yaml\nkernel: {dst.name}\nmodel: {kernels_dir.name}\norigin: derived\n"
+              f"parent: {src.name}\nchange: TODO: one line, what is new vs parent\n```\n")
+    old = readme.read_text() if readme.exists() else ""
+    m = re.match(r"# [^\n]*\n+```yaml\n.*?\n```\n", old, re.S)  # parent's title + header
+    readme.write_text(header + old[m.end():] if m else header + "\n" + old)
     return dst
 
 
 def cmd_new_kernel(args, extra) -> int:
-    """Copy the newest kernel (or --from) to kernels/kernel_<name>_<YYYYMMDD-HHMM>/ to start a new version."""
+    """Copy the newest kernel (or --from) to kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/ to start a new version.
+    Fills in the README lineage header (CLAUDE.md); you write its `change:` line."""
     src = kernel_dir(args.from_kernel)
     dst = new_kernel(args.name, src, paths().KERNELS_DIR)
     print(f"created {dst.relative_to(HERE)} (copied from {src.name}); it is now the default kernel.")
-    print("next: edit it, update its README/kernel.json, then `make test` and `make bench-ours`.")
+    print("next: set `change:` in its README header, edit it, then `make test` and `make bench-ours`,")
+    print("then add a row to kernels/README.md (see CLAUDE.md).")
     return 0
 
 
 def cmd_clean(args, extra) -> int:
-    """Remove build outputs and caches (kernels/*/.build, __pycache__, .pytest_cache). Never touches weights."""
-    targets = [*HERE.glob("kernels/*/.build"), *HERE.glob(".pytest_cache")]
+    """Remove build outputs and caches (kernels/<model>/*/.build, __pycache__, .pytest_cache). Never touches weights."""
+    targets = [*paths().KERNELS_DIR.parent.glob("*/*/.build"), *HERE.glob(".pytest_cache")]
     targets += [p for p in HERE.rglob("__pycache__") if ".venv" not in p.parts]
     for t in targets:
         shutil.rmtree(t)
