@@ -125,7 +125,8 @@ def create_app(runner: Runner, default_max_tokens: int = 512) -> FastAPI:
 
         def sse() -> Iterator[str]:
             def event(choices: list, **extra) -> str:
-                return f"data: {json.dumps({**base, 'object': 'chat.completion.chunk', 'choices': choices, **extra})}\n\n"
+                chunk = {**base, "object": "chat.completion.chunk", "choices": choices, **extra}
+                return f"data: {json.dumps(chunk)}\n\n"
 
             try:
                 yield event([{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}])

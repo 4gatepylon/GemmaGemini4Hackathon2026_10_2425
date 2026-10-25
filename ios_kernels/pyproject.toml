@@ -22,7 +22,13 @@ openai-server = "surfaces.openai_server.server:main"
 cli-chat = "surfaces.cli_client.chat:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.17"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [build-system]
 requires = ["hatchling"]
