@@ -47,7 +47,9 @@ Notes:
 
 1. Pick the model folder: `kernels/<model>/`, where `<model>` = HF repo id with `/` -> `__`
    (e.g. `unsloth/Llama-3.2-1B-Instruct` -> `unsloth__Llama-3.2-1B-Instruct`).
-   Only `unsloth__Llama-3.2-1B-Instruct` is wired up (hard-coded in `surfaces/paths.py`).
+   The default model is `MODEL` in `surfaces/paths.py`; other models' kernels are picked with
+   `--kernel`. A new model folder also needs its baseline file names (GGUF, MLX) in `BASELINES`
+   there, and its HF reference text in `surfaces/tests/test_kernel_e2e.py` (`SKY_REFS`).
 2. Copy the parent kernel folder (usually the newest) to
    `kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/`, or start an empty folder for a root kernel.
    - `<name>`: short, lowercase, `_`-separated, describes what the kernel *is*
@@ -91,9 +93,8 @@ grep -rl '^parent: kernel_metal_f16_20261024-1620$' kernels/*/*/README.md   # ch
 
 - **Kernel folders are immutable** once merged. Iterate by copying. Only doc fixes are allowed in old folders.
 - **Large artifacts never go in git**: weights, GGUFs, and llama.cpp go in `<repo>/.context/`
-  (`$DATA_DIR`, shared across worktrees: see Worktree setup); build output goes in each kernel's
-  gitignored `.build/`.
-- **Find kernels by path through `surfaces/paths.py`** (`resolve_kernel`, `KERNELS_DIR`), not by
+  (`$DATA_DIR`); build output goes in each kernel's gitignored `.build/`.
+- **Find kernels by path through `surfaces/paths.py`** (`resolve_kernel`, `KERNELS_ROOT`, `baseline`), not by
   hard-coding folder names.
 - **Every folder has a `README.md`** whose top is a one-sentence description of the folder.
   "Top" means right after any required top-of-file formatting (the `# <title>` line, and in kernel

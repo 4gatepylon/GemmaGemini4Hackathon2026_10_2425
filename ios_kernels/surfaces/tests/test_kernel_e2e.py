@@ -19,11 +19,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 SKY = [{"role": "user", "content": "Explain in two sentences why the sky is blue."}]
-# HF transformers fp32 greedy continuation (see benchmarking/reference.py).
-SKY_REF = (
-    "The sky appears blue because of a phenomenon called Rayleigh scattering, in which shorter "
-    "wavelengths of light, such as blue and violet, are scattered more than longer wavelengths"
-)
+# HF transformers fp32 greedy continuation per model folder (see benchmarking/reference.py).
+SKY_REFS = {
+    "unsloth__Llama-3.2-1B-Instruct": (
+        "The sky appears blue because of a phenomenon called Rayleigh scattering, in which shorter "
+        "wavelengths of light, such as blue and violet, are scattered more than longer wavelengths"
+    ),
+}
+SKY_REF = SKY_REFS[kernel_dir.parent.name]
 
 
 @pytest.fixture(scope="module")

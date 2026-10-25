@@ -1,4 +1,4 @@
-"""Benchmark a kernel vs llama.cpp vs MLX on the same FP16 Llama-3.2-1B.
+"""Benchmark a kernel vs llama.cpp vs MLX on the same FP16 model (the kernel's).
 
     uv run --extra bench benchmarking/bench.py [--kernel NAME] [--pp 512] [--tg 128] [--reps 5]
         [--engine-args "--define MV_NR=2"]
@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-from surfaces.paths import LLAMA_DIR, MODELS_DIR, load_manifest, resolve_kernel
+from surfaces.paths import LLAMA_DIR, MODELS_DIR, baseline, load_manifest, resolve_kernel
 
 
 def show(cmd: list, pattern: str, merge_stderr: bool = False) -> None:
@@ -66,7 +66,7 @@ def main() -> None:
         [
             LLAMA_DIR / "build/bin/llama-bench",
             "-m",
-            MODELS_DIR / "llama1b_f16.gguf",
+            baseline("gguf", kernel),
             "-p",
             pp,
             "-n",
@@ -87,7 +87,7 @@ def main() -> None:
             "mlx_lm",
             "benchmark",
             "--model",
-            MODELS_DIR / "llama1b_mlx_f16",
+            baseline("mlx", kernel),
             "-p",
             pp,
             "-g",
