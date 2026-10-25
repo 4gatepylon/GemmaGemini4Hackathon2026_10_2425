@@ -30,5 +30,5 @@ class Runner(ABC):
         """Greedy-generate a reply. Must end with exactly one chunk whose finish_reason is set.
         Raise ValueError for bad requests (e.g. prompt longer than the context)."""
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027 (optional hook, default no-op)
         """Release resources (subprocesses, GPU memory)."""

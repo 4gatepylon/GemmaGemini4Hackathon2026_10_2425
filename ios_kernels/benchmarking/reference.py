@@ -61,7 +61,7 @@ def main() -> None:
 
     diff = np.abs(ours - ref)
     top_ours, top_ref = np.argsort(-ours)[:5], np.argsort(-ref)[:5]
-    n_match = next((i for i, (a, b) in enumerate(zip(res["tokens"], ref_gen)) if a != b),
+    n_match = next((i for i, (a, b) in enumerate(zip(res["tokens"], ref_gen, strict=False)) if a != b),
                    min(len(res["tokens"]), len(ref_gen)))
     print(f"logits: max|diff| {diff.max():.4f}, mean|diff| {diff.mean():.5f}, ref range ±{np.abs(ref).max():.1f}")
     print(f"top5 ours {top_ours.tolist()} ref {top_ref.tolist()}")
