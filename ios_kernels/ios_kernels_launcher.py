@@ -122,9 +122,9 @@ def cmd_serve_llamacpp(args, extra) -> int:
     server = llama / "build/bin/llama-server"
     if not gguf.exists():
         raise SystemExit(f"{gguf} missing; run `make setup` first")
-    if not server.exists():
-        if code := run(["cmake", "--build", llama / "build", "-j", "10", "--target", "llama-server"]):
-            return code
+    build = ["cmake", "--build", llama / "build", "-j", "10", "--target", "llama-server"]
+    if not server.exists() and (code := run(build)):
+        return code
     print(f"chat with it: make chat args=\"--port {args.port}\"", file=sys.stderr)
     return run([server, "-m", gguf, "-ngl", "99", "--host", args.host, "--port", args.port, *extra])
 

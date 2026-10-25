@@ -74,7 +74,8 @@ def test_new_kernel_copies_without_build_output(tmp_path):
     # Lineage header (CLAUDE.md schema) now describes the copy, and the body is kept.
     assert (dst / "README.md").read_text() == (
         "# kernel_metal_q8_20261024-1705\n\n```yaml\nkernel: kernel_metal_q8_20261024-1705\nmodel: org__Model\n"
-        "origin: derived\nparent: kernel_a_20260101-0000\nchange: TODO: one line, what is new vs parent\n```\n\nBody.\n")
+        "origin: derived\nparent: kernel_a_20260101-0000\nchange: TODO: one line, what is new vs parent\n```\n"
+        "\nBody.\n")
     with pytest.raises(SystemExit, match="already exists"):
         launcher.new_kernel("metal_q8", src, model_dir, now=datetime(2026, 10, 24, 17, 5))
     with pytest.raises(SystemExit, match="bad name"):
