@@ -34,8 +34,17 @@ def paths():
     return p
 
 
+class Terminated(BaseException):
+    """SIGTERM/SIGHUP sent to the launcher alone (`kill <pid>`, an IDE's stop button). Raised like KeyboardInterrupt."""
+
+
+def on_terminate(signum, frame):
+    raise Terminated(signum)
+
+
 def run(cmd: list, cwd: Path = HERE) -> int:
-    """Run a command in the foreground. Ctrl-C stops the child (it gets SIGINT too) without a traceback."""
+    """Run a command in the foreground. Ctrl-C stops the child (it gets SIGINT too) without a traceback.
+    SIGTERM/SIGHUP may reach only the launcher, so they are passed on; otherwise the child (a server) is orphaned."""
     print("+ " + " ".join(str(c) for c in cmd), file=sys.stderr, flush=True)
     proc = subprocess.Popen([str(c) for c in cmd], cwd=cwd)
     while True:
@@ -43,6 +52,8 @@ def run(cmd: list, cwd: Path = HERE) -> int:
             return proc.wait()
         except KeyboardInterrupt:
             continue  # the child got the same SIGINT; wait for it to shut down
+        except Terminated as t:
+            proc.send_signal(t.args[0])  # pass it on; wait for the child to shut down
 
 
 def kernel_dir(name: str | None) -> Path:
@@ -402,7 +413,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        if signal.getsignal(sig) is not signal.SIG_IGN:  # e.g. keep nohup's SIGHUP ignored
+            signal.signal(sig, on_terminate)
     try:
         sys.exit(main())
     except KeyboardInterrupt:
         sys.exit(130)
+    except Terminated as t:
+        sys.exit(128 + t.args[0])

@@ -1,5 +1,7 @@
 # Surfaces: design and limitations
 
+> As of: main @ 028399a, 2026-10-25 13:25 PDT
+
 **Purpose:** let a human try out LLM generation from our kernels by hand: chat in a
 terminal, or point any OpenAI-compatible tool at a local endpoint. This is a *manual
 testing* surface, not a production server. Every choice below favors simplicity and

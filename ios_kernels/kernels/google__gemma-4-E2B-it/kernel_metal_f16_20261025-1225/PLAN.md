@@ -1,9 +1,11 @@
 # PLAN: Gemma 4 E2B (text) on hand-written Metal, FP16
 
+> As of: main @ 028399a, 2026-10-25 13:25 PDT
+
 > NOTE: this was written by: Claude Opus 5.5 (`claude-opus-5-5[1m]`) in Claude Code, running
 > inside Conductor (workspace `hanoi`), against commit `6880596` (`main`), 2026-10-24 18:15 PDT.
 > Status section added by the same agent after implementing it, on top of `a81d5d8`
-> (PR #28, multi-model support), 2026-10-25 12:55 PDT.
+> (PR #28, multi-model support; merged to main as `81d07d9`), 2026-10-25 12:55 PDT.
 
 **Goal:** a from-scratch forward pass for **`google/gemma-4-E2B-it`**, the smallest Gemma 4
 model, in the same style as `kernels/unsloth__Llama-3.2-1B-Instruct/kernel_metal_f16_20261024-1620`

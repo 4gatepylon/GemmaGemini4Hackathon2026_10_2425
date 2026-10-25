@@ -1,0 +1,2 @@
+# Large local artifacts (weights, llama.cpp builds, traces); see ios_kernels/README.md
+.context/
