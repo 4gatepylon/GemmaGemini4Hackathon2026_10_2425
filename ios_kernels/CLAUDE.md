@@ -25,6 +25,7 @@ fix this file together with the user first.
 4. Keep the folder contract (see `surfaces/DESIGN_AND_LIMITATIONS.md#how-to-swap-things`):
    `kernel.json`, build script, weight converter, and a binary with `--serve` + bench flags.
 5. Verify (see Checks), then add a row to the table in `kernels/README.md`.
+   `uv run utils/kernel_lineage.py` should show the new kernel under its parent.
 
 Layout is always exactly depth 2: `kernels/<model>/kernel_*/`. Don't nest kernels inside
 kernels; lineage lives in the header.
@@ -43,7 +44,8 @@ change: <one line: what is new vs parent (root: what it is)>
 ```
 ````
 
-One `key: value` per line, so it's grep-able:
+`uv run utils/kernel_lineage.py` prints the lineage as one tree per model. One `key: value`
+per line, so it's also grep-able:
 
 ```sh
 grep -rh '^parent: ' kernels/*/*/README.md        # all lineage edges
@@ -61,6 +63,13 @@ grep -rl '^parent: kernel_metal_f16_20261024-1620$' kernels/*/*/README.md   # ch
 - **New scripts are Python, runnable with `uv run`** (deps in `pyproject.toml`), not bash.
   Existing `.sh` files (`benchmarking/*.sh`, each kernel's `build.sh`) will be ported later.
 - **Keep changes minimal** and match the surrounding style.
+
+## Utilities (`utils/`)
+
+Small standalone helper scripts, run from `ios_kernels/` with `uv run utils/<script>.py`.
+New utility scripts go here.
+
+- `kernel_lineage.py`: kernel lineage, one tree per model (from each README's `parent:` line).
 
 ## Checks
 
