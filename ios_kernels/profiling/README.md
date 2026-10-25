@@ -121,7 +121,7 @@ JSON, one summary line on stdout):
 - **`notes`:** plain-language warnings (on battery, thermal pressure, GPU busy before the run).
 
 The idle baseline is measured before the run, so load that starts mid-run shows up only as
-slow outliers. An Instruments (xctrace) recording can attribute GPU time to processes.
+slow outliers. xctrace recordings attribute GPU time to processes (see "Systems of kernels").
 
 ## Output format: `kprof/1`
 
@@ -181,5 +181,68 @@ uv run profiling/tools/compare.py ours.json llama.json --labels ours,llama \
 
 `profiling/.build/knoise [--out PATH] [--idle-ms MS] [--name NAME] -- COMMAND ...` runs the
 command and writes a `kprof` file with the same noise fields as `kbench`, a GPU-util counter
-track, and one event spanning the command. `llama_ops.py bench` uses it, and it works for
-`llama-bench`, our engine, or anything else.
+track, and one event spanning the command. `llama_ops.py bench` and `xctrace_record.py` use
+it, and it works for `llama-bench`, our engine, or anything else.
+
+## Systems of kernels
+
+### Pipelines in `kbench`
+
+A spec whose steps share buffers is a pipeline; `loop`, `steps[].group` and `whole` (see the
+spec table) shape it. `examples/pipeline/decoder.json` is one decode token through
+Llama-3.2-1B-shaped layers. Its events nest as `rep > layer i > attention|mlp > step`, and
+its report ends with the whole-vs-split comparison.
+
+### Embedding `RegionProfiler` in a Swift/Metal program
+
+Compile `profiling/lib/*.swift` together with the program
+(`swiftc ... profiling/lib/*.swift main.swift`):
+
+```swift
+let prof = RegionProfiler(device: device)            // serialize = true: regions never overlap
+let cb = queue.makeCommandBuffer()!
+let enc = prof.makeEncoder(cb, name: "qkv", kernel: "matvec_f16",
+                           stack: ["token 0", "layer 3", "qkv"], bytes: b, flops: f)
+// ... set pipeline and buffers, dispatch ...
+prof.end(enc)                                        // instead of enc.endEncoding()
+cb.commit(); cb.waitUntilCompleted()
+let (events, invalid) = prof.collect()               // ns, CLOCK_UPTIME_RAW; resets the profiler
+var k = KProf(meta: KProf.Meta(tool: "myengine", name: "decode", created: isoNow(), device: deviceMeta(device),
+                                os: ProcessInfo.processInfo.operatingSystemVersionString, git: nil,
+                                argv: CommandLine.arguments, spec: nil, params: nil))
+k.events = events
+try k.write(to: "out.json")
+```
+
+Keep an unsplit measurement of the same work next to the split one (as `kbench`'s `whole`
+does), so the cost of profiling is known. Wrap the program in `knoise` to record the noise.
+
+### Any process, including llama.cpp: xctrace
+
+```sh
+uv run profiling/tools/xctrace_record.py -- $DATA_DIR/deps/llama.cpp/build-tests/bin/llama-bench \
+    -m $DATA_DIR/models/llama1b_f16.gguf -p 0 -n 16 -r 1 -ngl 99
+uv run profiling/tools/xctrace_export.py $DATA_DIR/prof/xctrace/llama-bench-<time>.trace
+# check our own timestamps against Instruments on the same run:
+uv run profiling/tools/xctrace_record.py --out $DATA_DIR/prof/xctrace/dec.trace -- profiling/.build/kbench \
+    profiling/examples/pipeline/decoder.json --out $DATA_DIR/prof/xctrace/dec.kbench.json
+uv run profiling/tools/xctrace_export.py $DATA_DIR/prof/xctrace/dec.trace --validate $DATA_DIR/prof/xctrace/dec.kbench.json
+```
+
+- `xctrace_record.py` records headless with Metal System Trace (or
+  `profiling/templates/kprof.tracetemplate` when it exists) under `knoise`, and checks that
+  the trace is readable afterwards.
+- `xctrace_export.py` writes `kprof` with:
+  - the target process's GPU intervals, one per encoder, named by the encoder label
+    (`RegionProfiler` labels encoders with the step name);
+  - other processes' GPU work in the same window (as tracks, and summarized in
+    `noise.xctrace.other_gpu_processes`);
+  - GPU performance states and thermal states, and the device-wide GPU busy %;
+  - encoders split by preemption.
+- `--validate` compares per-encoder medians with a `kbench` file from the same run. Both read
+  the GPU's encoder timestamps, so medians agree. Means can differ for preempted encoders:
+  our span includes the preempted time, while xctrace sums only the active pieces.
+- With the stock template, granularity is one interval per encoder. That's per kernel for
+  `RegionProfiler` users. For llama.cpp, whose encoders are unlabeled and hold many ops,
+  it's a fraction of a token. Per-kernel llama.cpp timelines need the shader timeline
+  (PLAN.md, objective 4).
