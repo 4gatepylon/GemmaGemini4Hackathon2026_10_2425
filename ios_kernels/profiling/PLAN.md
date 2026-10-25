@@ -1,51 +1,63 @@
 # PLAN: profiling our Metal kernels vs llama.cpp
 
-> As of: main @ 76055cc, 2026-10-24 14:00 PDT
+> As of: main @ 028399a, 2026-10-25 13:11 PDT
 
-> NOTE: this was written by: an earlier agent session (model and harness not recorded), landed in
-> commit 4df248c (#3). These two notes were added by Claude Opus 5.5 (`claude-opus-5-5`) in
-> Claude Code, Conductor workspace, 2026-10-24.
+> NOTE: this was written by: Claude Opus 5.5 (`claude-opus-5-5[1m]`, 1M-token context), an AI
+> coding agent in Claude Code inside Conductor (workspace `honolulu`), working with @4gatepylon.
+> The base commit and time of the latest edit are in the "As of" line above. The first version
+> landed in #3, and #14 (another session) added authorship and staleness notes. This version
+> replaces those notes: its paths follow the `kernels/` layout.
 
-> NOTE (stale): this plan predates the `kernels/` layout (#4, #5, #8). `../forward/` (and
-> `forward/main.swift`, `../forward/bench.sh`) no longer exist; the engine now lives in
-> `../kernels/<model>/kernel_<name>_<YYYYMMDD-HHMM>/` (`main.swift`, `kernels.metal`) and
-> benchmarking in `../benchmarking/bench.sh`. Paths below have not been updated yet.
+Working notes for agents in the loop: plan, status, measured numbers and history. Usage lives in
+[README.md](README.md). Everything for profiling lives in this folder, and it follows
+`../CLAUDE.md`: Python scripts run with `uv run`, never bash; every folder has a README;
+docs are present tense; PRs are based on `main`.
 
-**Goal:** a repeatable way to answer "where does the time go, and why?" for our
-hand-written Metal forward pass (`../forward/`), and the same question for
-llama.cpp's Metal backend, so the two can be compared kernel by kernel.
-That means two kinds of output:
-- **numbers**: time per kernel, share of the token/prompt, achieved GB/s and
-  FLOP/s against the measured peak (roofline), gaps where the GPU is idle;
-- **visuals**: a timeline/Gantt view (token > layer > kernel) and an
-  aggregate flame-graph-style view, for both engines.
-
-**Long-term goal:** every future kernel (Q8_0/Q4 matvec, flash attention,
-Gemma 3, ...) comes with a one-command profile next to the llama.cpp
-baseline, so optimization work is driven by measurements, not guesses.
-
-**This document is the plan only.** The tooling it describes lands in later
-PRs. Everything below marked *verified* was run on this machine.
-Everything marked *to verify* is still an assumption.
-
-Machine: Apple M3 Pro (18-core GPU), 36 GB, macOS 15.7.3, Xcode 26.3,
+Machine: Apple M3 Pro (18-core GPU, `AGXAcceleratorG15X`), 36 GB, macOS 15.7.3, Xcode 26.3,
 `xctrace` 26.0. Same box as `../PLAN.md`.
 
 ---
 
+## Objectives
+
+"**Be able to X**" means a clean, reusable interface: a library, a CLI, and/or documentation
+that other agents and humans can follow. With it, anyone can get reliable, reproducible
+performance numbers for X in the future. A one-off measurement doesn't count.
+
+| # | Objective | Interface | Done when |
+|---|---|---|---|
+| 1 | **Profile a simple, single kernel** (e.g. a matmul) | `kbench` (JSON spec -> timing stats, GB/s, GFLOP/s, % of the *measured* roof). `llama_ops.py` + `compare.py` (llama.cpp's number for the same op, side by side) | matvec and GEMM examples run with one command each; repeatable within a few %; llama.cpp's numbers next to ours |
+| 2 | **Profile a combination of kernels in one system** | `kbench` pipelines (`loop`/`group`/`whole`). `RegionProfiler` for any Swift/Metal program. `xctrace_record.py` + `xctrace_export.py` for any process, including `llama-bench` | A decoder-layer pipeline gives a per-step breakdown plus the split overhead; xctrace recordings export to the common format and cross-check our timestamps |
+| 3 | **Show Gantt and/or flame charts** | `kviz.py`: Perfetto JSON (interactive), folded stacks (speedscope), static PNG Gantt/flame/share charts | Charts from the outputs of objectives 1 and 2 |
+| 4 | **Profile the components of a non-trivial kernel, plus hardware metrics** (cache hits/misses, occupancy, limiters) | `kbench` sweeps/ablations (`#define` variants -> component cost by difference), pipeline stats, working-set sweeps (cache levels), `--capture` (`.gputrace` for Xcode), counter export from a saved Instruments template | A GEMM split into load / MMA / store costs; a working-set sweep that shows the cache cliffs; documented, reproducible steps to get hardware counters for any kernel |
+| 5 | **Profile the existing kernels** (`../kernels/<model>/kernel_*/`), *last* | Specs for each engine kernel at real shapes, a whole-engine timeline, a comparison against llama.cpp's exact graph ops | Per-kernel tables and charts for decode and prefill, ours vs llama.cpp, with noise recorded |
+
+Objectives 1-4 land first, as small PRs. Objective 5 comes in a separate PR afterwards.
+
 ## Questions profiling has to answer
 
-1. **Per-kernel breakdown**: which kernels dominate decode (`tg`) and prefill
-   (`pp`), in ms and in % of the total?
-2. **Distance to the roof**: for each kernel, achieved GB/s (decode matvecs
-   are bandwidth bound) or FLOP/s (prefill GEMMs are compute bound) against
+1. **Per-kernel breakdown**: which kernels dominate decode (`tg`) and prefill (`pp`), in ms and %?
+2. **Distance to the roof**: achieved GB/s (bandwidth bound) or FLOP/s (compute bound) against
    the *measured* peak of this GPU.
-3. **Why it's slow**: what limits a given kernel? Memory, ALU, occupancy,
-   threadgroup-memory/barrier stalls, register spills?
-4. **Idle GPU time**: gaps between kernels (dispatch overhead, serial
-   dependencies), and whether the CPU encodes fast enough.
-5. **Same questions for llama.cpp**, with the same tool where possible, so
-   that "ours vs theirs" is apples to apples.
+3. **Why it's slow**: memory, ALU, occupancy, threadgroup-memory/barrier stalls, register
+   pressure, cache misses?
+4. **Idle GPU time**: gaps between kernels, and whether the CPU encodes fast enough.
+5. **Same questions for llama.cpp**, with the same tools where possible.
+
+## Noise policy: record it, don't require a quiet machine
+
+Realistic workloads run with other things going on, so we don't require a quiesced machine.
+**Every measurement records the noise present while it ran**, so numbers can be read in context
+and outliers explained:
+- device-wide GPU utilization (IOAccelerator `PerformanceStatistics`, no sudo), before the run
+  (other processes' baseline) and during it;
+- power source, Low Power Mode, thermal state, load average, busiest processes;
+- spread between repetitions;
+- in xctrace recordings, other processes' GPU intervals inside our window, GPU performance
+  states, and preempted (split) encoders.
+
+Optional, documented but not required: AC power, closing GPU-heavy apps,
+`sudo powermetrics --samplers gpu_power`.
 
 ---
 
@@ -53,281 +65,265 @@ Machine: Apple M3 Pro (18-core GPU), 36 GB, macOS 15.7.3, Xcode 26.3,
 
 | Decision | Choice | Why |
 |---|---|---|
-| Per-kernel numbers for **our** engine | `--profile` mode: a `Profiler` (in `profiling/`) that puts GPU timestamps around every dispatch of the engine's encode path | Headless, scriptable, exact attribution to our own op names, no GUI. Prototype already works (see "Findings so far"). |
-| Where profiling code lives | Everything in `ios_kernels/profiling/`. The one exception is the per-op hook calls inside the engine's encode functions (see Layer 1) | Keeps profiling self-contained while the rest of the code gets reorganized. |
-| Per-kernel numbers for **llama.cpp** | `xctrace` (Instruments CLI) with the Metal shader timeline, plus llama.cpp's own `test-backend-ops perf` | We don't want to patch the baseline. xctrace sees any process's GPU work. `test-backend-ops` is llama.cpp's per-op microbenchmark. |
-| Same view for both engines | One exporter: xctrace XML -> Chrome Trace Event JSON + per-kernel table, run on both traces | One tool and one format, so differences come from the engines, not the tooling. |
-| Deep dive on one kernel ("why") | Xcode GPU frame capture (`.gputrace`) | Only place with per-dispatch hardware counters, limiters, occupancy and per-line shader cost. GUI only, so use it for investigation, not automation. |
-| Visualization | **Don't build a viewer.** Emit Chrome Trace Event JSON and open it in [Perfetto UI](https://ui.perfetto.dev) (Gantt/timeline, nested slices). Emit folded stacks for [speedscope](https://www.speedscope.app) (flame graph). Instruments/Xcode for their own views | Free, local (Perfetto processes the trace in the browser), handles nesting and millions of events. Only the small exporters are ours. |
-| Roofline peaks | Measure them with our own microbenchmarks (streaming read, `simdgroup_matrix` FMA loop) | Spec-sheet numbers (~150 GB/s) are only approximate. A measured roof makes "% of peak" meaningful. |
-| Where data goes | Traces/exports in `.context/prof/` (gitignored). Only scripts, templates and small result tables are committed | `.trace` bundles and XML exports are large (113 MB of counter XML for one ~10 s run). |
-| llama.cpp version | Same build as the benchmarks (`d327bf1`, stock) | Profile the exact baseline we compare against. |
+| Timing source | `MTLCounterSampleBuffer` timestamps at encoder boundaries, one encoder per timed region, regions chained with an `MTLFence` | Exact GPU time without a GUI. Apple GPUs can't sample per dispatch, and they run independent encoders concurrently (see roadblocks) |
+| One output format | `kprof/1` JSON. Every tool writes it (`kbench`, `knoise`, `RegionProfiler` users, `llama_ops.py`, `xctrace_export.py`) and every consumer reads it (`compare.py`, `kviz.py`) | Producers and viewers stay independent; ours vs llama.cpp is just two files |
+| Languages | Swift for anything that touches Metal (plain `swiftc`, built by `build.py`). Python for export and charts, run with `uv run` (matplotlib in the `profiling` extra) | Same toolchain as the kernels; repo rule: scripts are Python |
+| Kernel benches are data, not code | JSON specs with arithmetic expressions | New kernels get profiled by writing a spec |
+| llama.cpp per-op baseline | `test-export-graph-ops` (the exact ops of our GGUF) -> `test-backend-ops perf --output sql` -> `kprof` | Stock llama.cpp, no patches |
+| Cross-process / llama.cpp timelines | `xctrace` + exporter. Per-kernel detail needs a template saved once from the Instruments GUI | The only way to see llama.cpp's kernels without patching it |
+| Hardware counters | Instruments counter template (headless after a one-time GUI save) and Xcode GPU capture (`.gputrace`, GUI analysis) | No public API exposes them (`MTLCounterSet` on this GPU is `timestamp` only) |
+| Visualization | Perfetto UI and speedscope via exported files, plus our own static PNGs for embedding | Free, local, scale to big traces |
+| Data | Outputs in `$DATA_DIR/prof/` (gitignored). Only code, specs, templates and example images are committed | Traces are large |
+| Objective 5 vs immutable kernel folders | **Decided: replay, don't instrument.** `kbench` specs replay the engine's own `kernels.metal` (read-only, `--source`) at its dispatch geometry, and the real binary is timed whole (`--measure`) to validate the replay. A derived kernel folder with `RegionProfiler` hooks stays an option if per-op timing inside the real binary is ever needed | Touches no kernel folder. The replay matches the real engine within ~1% (decode) and 0.1% (prefill) |
 
 ---
 
-## Tool survey (what exists, what it gives us)
+## Tool survey
 
 | Tool | Gives | Headless? | Both engines? | Status |
 |---|---|---|---|---|
-| **Our `--profile` mode** (`MTLCounterSampleBuffer` timestamps) | Exact per-dispatch GPU time, named by us; bytes/FLOPs per op -> GB/s, FLOP/s; Perfetto JSON | yes | ours only | *verified* (prototype) |
-| **`xctrace record --template 'Metal System Trace'`** | GPU timeline per command buffer/encoder, driver events, GPU performance state, thermal state, all processes | yes | yes | *verified*, but default template is too coarse (see roadblocks) |
-| **Same, with a custom template (shader timeline + counter set)** | Per-shader (kernel) intervals and GPU counters (limiters, occupancy, ...) | yes, once the template exists | yes | *to verify*, template must be saved once from the Instruments GUI |
-| **`xctrace export --toc / --xpath`** | Any table of a trace as XML (schemas: `metal-gpu-intervals`, `metal-shader-profiler-intervals`, `metal-gpu-counter-intervals`, `gpu-counter-info`, `gpu-performance-state-intervals`, `os-signpost`, ...) | yes | yes | *verified* |
-| **Xcode GPU capture** (`MTLCaptureManager` -> `.gputrace`) | Per-dispatch counters, limiters, occupancy, shader cost / per-line profile (M3 has hardware support for this) | capture yes, analysis needs the Xcode GUI | yes: llama.cpp has `GGML_METAL_CAPTURE_COMPUTE` | *to verify* on our runtime-compiled shaders |
-| **`test-backend-ops perf`** (llama.cpp) | us/run and GB/s or GFLOP/s per op and shape, on `MTL0` | yes | llama.cpp only | built (`.context/llama-build/bin/`), *no numbers yet* |
-| **`test-export-graph-ops`** + `test-backend-ops --test-file` (llama.cpp) | Exports the ops of a real model graph, so `test-backend-ops` benchmarks llama.cpp's *exact* Llama-3.2-1B shapes | yes | llama.cpp only | exists in source, *to verify* |
-| **`os_signpost`** (Points of Interest) | CPU-side intervals (encode time per token) in Instruments | yes | ours only | *to verify* (planned) |
-| **Perfetto UI / speedscope** | Gantt timeline / flame graph from JSON / folded stacks | n/a (browser) | yes | Perfetto JSON *verified* to be produced. Opening it in the UI not yet checked |
+| `MTLCounterSampleBuffer` timestamps | GPU time per encoder | yes | ours | *verified* (stage boundary only) |
+| `xctrace record` with the stock Metal System Trace | GPU intervals per encoder, GPU perf/thermal states, all processes | yes | yes | *verified*, per encoder only |
+| The same with a GUI-saved template (shader timeline + counter set) | per-kernel intervals, GPU counters | yes, after a one-time GUI step | yes | *to verify* |
+| Xcode GPU capture (`.gputrace`) | per-dispatch counters, limiters, occupancy, per-line shader cost | capture yes (`kbench --capture`), analysis GUI only | yes (`MTL_CAPTURE_ENABLED=1 GGML_METAL_CAPTURE_COMPUTE=1`) | capture *verified*; Xcode analysis *to verify* |
+| `test-export-graph-ops` / `test-backend-ops perf` | a model's unique graph ops / us per op | yes | llama.cpp | *verified* |
+| IOAccelerator `PerformanceStatistics` | device-wide GPU busy % | yes, no sudo | n/a (noise) | *verified* |
+| Perfetto UI / speedscope | interactive timeline / flame graph | browser | yes | Perfetto *verified* (headless Chrome loads our JSON) |
 
-Useful facts found along the way (*verified*):
-- On Apple silicon, `device.sampleTimestamps()` returns identical CPU and GPU
-  values in **nanoseconds** (the `CLOCK_UPTIME_RAW` domain, not 24 MHz Mach
-  ticks). So GPU kernel spans and CPU encode spans can share one timeline.
-- llama.cpp's Metal backend env vars: `GGML_METAL_CAPTURE_COMPUTE`,
-  `GGML_METAL_CONCURRENCY_DISABLE`, `GGML_METAL_FUSION_DISABLE`,
-  `GGML_METAL_FUSION_DEBUG`, `GGML_METAL_GRAPH_DEBUG`,
-  `GGML_METAL_GRAPH_OPTIMIZE_DISABLE` (and residency/shared-buffer/tensor toggles).
-- `GGML_METAL_CAPTURE_COMPUTE=N` captures the N-th graph compute to
-  `/tmp/perf-metal-<pid>.gputrace`, and while capturing it wraps every op in a
-  debug group named after the ggml op. Capture needs Metal capture enabled
-  for a non-Xcode process (Apple's env var is `MTL_CAPTURE_ENABLED=1`.
-  llama.cpp's error message says `METAL_CAPTURE_ENABLED`, *to verify* which one works).
-- llama.cpp encodes with `MTLDispatchTypeConcurrent` plus explicit
-  `memoryBarrier` calls, so independent kernels can overlap. We use the
-  default serial encoder. This matters for timeline comparisons (below).
+llama.cpp hooks (*verified* in source, `d327bf1`): `GGML_METAL_CAPTURE_COMPUTE=N` captures the
+N-th graph compute to `/tmp/perf-metal-<pid>.gputrace`, with each op in a debug group (needs
+`MTL_CAPTURE_ENABLED=1`, *verified*); `GGML_METAL_CONCURRENCY_DISABLE`,
+`GGML_METAL_FUSION_DISABLE`, `GGML_METAL_GRAPH_DEBUG`; it encodes with
+`MTLDispatchTypeConcurrent` plus memory barriers, so its kernels can overlap, while ours run serially.
 
 ---
 
-## Design
+## Design (usage is in README.md)
 
-### Layer 1: built-in `--profile` mode (our engine)
-
-The M3 Pro supports counter sampling **only at stage (encoder) boundaries**,
-not at dispatch boundaries (*verified*:
-`supportsCounterSampling(.atStageBoundary) == true`,
-`.atDispatchBoundary == false`). The only counter set is `timestamp`. So in
-profile mode:
-
-- Every dispatch gets **its own compute encoder**, created from an
-  `MTLComputePassDescriptor` whose `sampleBufferAttachments[0]` points at an
-  `MTLCounterSampleBuffer` (start/end sample index per op).
-- Each op is registered with a **name** (`L3.qkv`, `L3.attention`, ...) and
-  its **bytes moved and FLOPs** (known statically from the shapes), so the
-  report can print GB/s and FLOP/s per op.
-- The same encode path is used for normal and profiled runs: each op
-  boundary is one `op("name", bytes:, flops:)` call, which is a no-op when
-  not profiling.
-- Code placement: `Profiler` (sample buffer, encoder splitting, timestamp
-  resolution, JSON/table output) lives in `profiling/Profiler.swift`, and
-  `profiling/build.sh` compiles it together with the engine sources. The
-  engine only needs the `op(...)` hook calls in its encode functions (one per
-  dispatch, about 11 call sites). Those are the only lines outside
-  `profiling/`, to be coordinated with the code cleanup.
-- **Perturbation check**: the report always prints unprofiled vs profiled GPU
-  time per token (from `gpuStartTime/gpuEndTime`), so we know how much
-  splitting into encoders distorts the result.
-- Outputs:
-  1. a per-op-kind table on stdout (n per token, us, %, GB/s, GFLOP/s);
-  2. `trace.json` in Chrome Trace Event format: one track per engine,
-     nested slices token > layer > op, with bytes/GB/s/FLOP/s in `args`;
-  3. (planned) folded stacks (`tg;layer3;qkv 1640`) for speedscope;
-  4. (planned) CPU encode spans on a second track, using the shared ns clock.
-- CLI sketch: `llm --weights W --profile tg|pp [--profile-steps N] --trace-out .context/prof/ours_tg.json`.
-
-Optional add-on: **ablation mode** (skip or replace one op kind in the
-normal, unsplit pipeline and measure the delta). This gives the marginal
-cost of an op including overlap effects that split encoders hide.
-
-### Layer 2: xctrace for both engines (cross-engine comparison)
-
-- A **custom Instruments template**, saved once from the Instruments GUI and
-  committed to `profiling/templates/`. It is Metal System Trace with the
-  shader timeline on and a useful GPU counter set (e.g. performance limiters,
-  occupancy; exact names *to verify* in the GUI).
-- `xctrace_record.sh ours|llama [args]`: runs
-  `xcrun xctrace record --template <ours.tracetemplate> --no-prompt --output .context/prof/<name>.trace --launch -- <binary> ...`
-  for our `llm` or `llama-bench`, with short runs (`--time-limit` or
-  `--window`) to keep exports small.
-- `xctrace_to_perfetto.py`: `xctrace export --xpath` the shader-interval,
-  encoder-interval, counter and performance-state tables. xctrace interns
-  repeated values (`id=` on first use, `ref=` afterwards), so it needs a
-  small resolver. A prototype parser exists. Filter to the target process.
-  Write (a) Chrome trace JSON and (b) a per-kernel table.
-- `compare.py`: joins the two per-kernel tables through a small hand-written
-  mapping from llama.cpp kernel names to our op kinds (e.g. their
-  `mul_mv` f16 kernels <-> our `matvec_*`). The mapping is filled in after the
-  first llama.cpp trace shows their kernel names.
-
-### Layer 3: Xcode GPU capture (deep dive, "why is this kernel slow")
-
-- Our engine: add `--capture PATH.gputrace` (capture one decode token or one
-  prefill chunk with `MTLCaptureManager`, `destination = .gpuTraceDocument`),
-  plus encoder/command-buffer labels and debug groups per op so the capture
-  is readable.
-- llama.cpp: `MTL_CAPTURE_ENABLED=1 GGML_METAL_CAPTURE_COMPUTE=N llama-bench ...`.
-- Open in Xcode: per-dispatch counters, limiter breakdown, occupancy, shader
-  cost / per-line attribution. *To verify*: per-line attribution for
-  shaders compiled at runtime from source. If it doesn't work, the fallback is
-  the optional Metal Toolchain download (offline compile with source/line info).
-
-### Per-op baseline for llama.cpp: `test-backend-ops perf`
-
-- `test-backend-ops perf -b MTL0 -o MUL_MAT -p '<params regex>' --output csv`
-  gives us/run and GB/s or GFLOP/s per op and shape.
-- The built-in perf case list may not contain our exact shapes. A first
-  guessed filter matched no cases. Plan: use `test-export-graph-ops` to dump
-  the real Llama-3.2-1B graph ops and feed them with `--test-file`, or
-  benchmark the closest built-in shapes.
-
-### Roofline microbenchmarks
-
-- `peak_bw`: streaming read (and copy) kernel over a buffer much larger
-  than the caches -> measured GB/s roof for decode.
-- `peak_mma`: `simdgroup_multiply_accumulate` FMA loop in registers ->
-  measured FP16-in/FP32-acc FLOP/s roof for prefill GEMMs.
-- Every per-kernel table reports "% of measured roof".
-
-### Measurement hygiene (applies to every layer)
-
-- **AC power**, nothing GPU-heavy open. A trace recorded during this
-  investigation had Chrome and WindowServer doing far more GPU work than our
-  process (about 2.4k Chrome GPU intervals vs our 63 command buffers).
-- **Warm page cache** before timing: the first run after the weights were
-  cold gave 34 tok/s instead of 52.
-- Record **GPU performance state and thermal state** (both are xctrace
-  tables) to catch clock ramp-up or throttling.
-- Several runs, with mean ± std, as in `../forward/bench.sh`.
+- **`kbench`** (`tools/kbench/`, `lib/`): spec -> one timed encoder per step (each step's
+  dispatch repeated `repeat` times), fence-chained, pipelined reps; `rotate` buffers against
+  cache reuse; `loop`/`group`/`whole` for pipelines; `--set` overrides; `peaks.json` keeps the
+  best measured roof.
+- **`RegionProfiler`** (`lib/`): the same timestamped, fence-chained encoders for any Swift/Metal
+  program. Event names become encoder labels, so xctrace shows them too.
+- **`knoise`**: noise around any command.
+- **`llama_ops.py`** / **`compare.py`**: llama.cpp per-op `kprof`, side-by-side tables.
+- **`xctrace_record.py`** / **`xctrace_export.py`**: headless Instruments recordings of any
+  process -> `kprof`, plus `--validate` against our own timestamps.
+- **`kviz.py`**: Perfetto JSON, folded stacks, PNG gantt/flame/share, table.
+- **Objective 4 (next)**: `sweep` (cartesian over defines/vars, one compile per variant) for
+  ablations; pipeline stats (`maxTotalThreadsPerThreadgroup`, `staticThreadgroupMemoryLength`);
+  a GEMM with switches that drop loads / MMA / stores (results kept observable so nothing is
+  dead-code eliminated); working-set sweeps for cache levels; `kbench --capture`; the
+  Instruments template plus counter export.
 
 ---
 
-## Findings so far (prototype `--profile`, rough: on battery, Chrome open)
+## PR plan
 
-Prototype = a scratch copy of `forward/main.swift` with the Layer 1 design
-(kept in `.context/prof/proto/`, not committed).
+Every PR is based on `main` (no stacking, per `../CLAUDE.md`). The feature PRs depend on each
+other, so they merge **in order**. Until its predecessor merges, a PR's diff also shows the
+predecessor's commit; after each merge, the next one gets rebased onto `main`.
 
-Decode, Llama-3.2-1B FP16, per token: unprofiled **19.27 ms** GPU,
-profiled 20.36 ms (**+5.7%** from splitting into ~115 encoders). Gaps
-between encoders total 0.46 ms.
+| PR | Objective | Contents | State |
+|---|---|---|---|
+| #3 | plan | PLAN v1 (survey + design) | merged |
+| #7 | plan | this file: objectives, noise policy, PR plan, status, findings, roadblocks | open |
+| #12 | 1 | `lib/`, `kbench`, `build.py`, matmul + roofline examples, README | open, merge 1st |
+| #16 | 1 | `knoise`, `kprof.py`, `llama_ops.py`, `compare.py` | open, merge 2nd |
+| #20 | 2 | pipeline example, `xctrace_record.py`, `xctrace_export.py`, RegionProfiler docs | open, merge 3rd |
+| #27 | 3 | `kviz.py`, `docs/` example images, `profiling` extra (matplotlib) | open, merge 4th |
+| #29 | 4 | sweeps/variants, pipeline stats, GEMM ablation, working-set sweep, `--capture`, `kviz sweep`, template instructions | open, merge 5th |
+| #32 | 5 | `profile_engine.py`, `engine/` replay specs + categories, `llama_ops.py graph`, `bench --runs` | open, merge 6th |
 
-| op | ms/token | % | GB/s |
+---
+
+## Findings (M3 Pro, measured 2026-10-24, mostly on battery with background load)
+
+**Measured roof** (`examples/roofline`, best values): streaming read **131.6 GB/s** (copy
+126.4, write 118.9); FP16->FP32 `simdgroup_matrix` MMA **6.21 TFLOP/s**; FP32 FMA 5.85
+TFLOP/s. With another workspace benchmarking at the same time, the same specs measured
+102-124 GB/s and 5.5-6.1 TFLOP/s, which is why `peaks.json` keeps the best value.
+
+**Single kernels, ours vs llama.cpp `d327bf1`** (`examples/matmul` vs `llama_ops.py mul-mat`):
+
+| shape | ours | llama.cpp | ours vs llama |
 |---|---:|---:|---:|
-| gate_up (fused SwiGLU matvec) | 8.16 | 41.0 | 131.6 |
-| down | 4.27 | 21.4 | 125.8 |
-| lm_head + argmax | 4.01 | 20.1 | 131.1 |
-| qkv | 1.64 | 8.2 | 122.7 |
-| wo | 1.11 | 5.6 | 120.9 |
-| norms + rope + attention + embed | 0.72 | 3.6 | n/a |
+| matvec f16 4096x4096 | 263 us, 127.5 GB/s | 249 us, 125.4 GB/s | 0.95x |
+| GEMM f16 T=512, 2048x2048 | 856 us, 5.02 TFLOP/s (81% of roof) | 795 us, 5.40 TFLOP/s | 0.93x |
+| naive GEMM, same shape | 22.6 ms, 0.19 TFLOP/s | - | - |
 
-Prefill, 512 tokens: unprofiled **253.9 ms**, profiled 257.8 ms (+1.5%).
+Cache effect (8 MiB matvec, `--set M=2048 --set K=2048`): same buffer every dispatch
+(`ROT=1`) 175 GB/s, rotated over 8 copies 123 GB/s; llama.cpp's cache-warm number is 187 GB/s.
+At 32 MiB the difference is gone (125 vs 127 GB/s), so the GPU's caches hold between 8 and 32 MiB.
 
-| op | ms | % | TFLOP/s |
-|---|---:|---:|---:|
-| gate_up GEMM | 116.0 | 45.1 | 4.74 |
-| down GEMM | 57.5 | 22.3 | 4.78 |
-| attention (naive) | 40.4 | 15.7 | 0.42 |
-| qkv GEMM | 19.9 | 7.7 | 5.18 |
-| wo GEMM | 14.4 | 5.6 | 4.76 |
-| everything else | ~9 | ~3.6 | n/a |
+**llama.cpp graph ops** (Llama-3.2-1B, 34 unique ops): decode-sized elementwise ops (ADD, MUL,
+RMS_NORM, ROPE, DUP on 2048 floats) all cost about 3 us/run, the launch floor that fusion removes.
 
-This agrees with `../README.md`: decode matvecs run at ~121-132 GB/s, near
-the bandwidth wall. In prefill, GEMMs are ~81% of the time and naive
-attention ~16%. Small decode kernels look slower than they are in this mode
-(each pays the per-encoder overhead).
+**Pipeline** (`examples/pipeline`, 16 layers, POS=511): one decode token takes 15.43 ms as one
+encoder vs 15.41 ms over 128 split encoders (−0.2%); matvecs run at 128-137 GB/s, gate_up is
+51% of the token, down 26%, qkv 10%, wo 7%, attention 4%, and norms/rope sit at 3-7 us each.
+
+**Validation**: across 1293 encoders, `RegionProfiler` and xctrace medians agree exactly on every
+label. Means differ only for the encoders WindowServer preempted (≤1.2%), because our span
+includes preempted time and xctrace sums only the active pieces.
+
+**GEMM components** (`examples/gemm_components`, 512x2048x2048, reproduced 3 times):
+
+| variant | median us | vs full |
+|---|---:|---:|
+| full | 867 | - |
+| no global loads | 833 | -4% |
+| no stores | 855 | -1% |
+| MMA only (no loads, no stores) | 832 | -4% |
+| no MMA | 128-154 | -82 to -85% |
+
+The inner loop (simdgroup loads from threadgroup memory + MMA) is ~96% of the time, at 83% of
+the MMA roof; global loads and stores hide behind it. Room to grow is in the inner loop: fewer
+simdgroup loads per MMA (larger register tiles), not in memory traffic.
+
+**Working set** (`examples/roofline/working_set.json`): ~1.0-1.9 TB/s up to 16 MiB, 525 GB/s at
+24 MiB, 230 GB/s at 32 MiB, DRAM (~125-140 GB/s) from 48 MiB. The GPU's last-level cache gives out
+between 16 and 32 MiB.
+
+**The existing engine vs llama.cpp** (`profile_engine.py --measure`, AC power; the
+Llama-3.2-1B artifacts were later removed from this machine, see roadblocks):
+
+| decode, per token (POS=64) | ours | llama.cpp |
+|---|---:|---:|
+| replay, one encoder / sum of isolated ops | 18.6 ms | 18.1 ms (cache-warm, wall time) |
+| real binary (`--bench-tg 128`) / `llama-bench` tg128 | **18.8 ms** | **19.3 ms** |
+| dispatches per token | 132 | 276 |
+| gate/up + SwiGLU, down, LM head | 8.1 / 4.1 / 4.0 ms | 8.0 / 3.8 / 3.8 ms |
+| QKV, output projection (small matrices: llama.cpp's op times are cache-warm) | 1.6 / 1.1 ms | 0.9 / 0.7 ms |
+
+| prefill, 512 tokens | ours | llama.cpp |
+|---|---:|---:|
+| replay / real binary | 248.0 / **248.3 ms** | sum of ops 194.8 / **llama-bench 192.6 ms** |
+| attention | **38.8 ms** (naive) | **9.0 ms** (flash attention) |
+| gate/up + SwiGLU | 115.2 ms | 96.6 ms |
+| down / output / QKV projection | 54.9 / 13.7 / 19.7 ms | 48.0 / 12.6 / 20.0 ms |
+
+Decode is at parity or slightly ahead (FP16 decode is bandwidth bound; quantization is the
+lever). Prefill's gap is mostly attention (~30 ms: a flash-attention kernel) and the SwiGLU/down
+GEMMs (~25 ms: GEMM tuning, see the GEMM components finding).
+
+**Power source matters:** on AC, the naive GEMM example runs at 0.28 TFLOP/s vs 0.19 on battery
+(same code), which is why every result records the power source.
+
+**Engine prototype** (scratch copy of the engine with one timed encoder per dispatch, not
+committed): decode 19.27 ms/token unprofiled vs 20.36 ms split (+5.7%); gate_up 41%, down
+21%, lm_head 20%, qkv 8%, wo 6%, everything else 4%. Prefill 512: 253.9 ms vs 257.8 ms
+(+1.5%); GEMMs 81% (4.7-5.2 TFLOP/s), naive attention 16% (40 ms).
 
 ---
 
 ## Dependencies
 
-Already on this machine: Xcode 26.3 (Instruments, `xctrace`, Metal debugger),
-Swift 6.2, Python 3 (stdlib `xml.etree` is enough for the exporter), a
-browser for Perfetto/speedscope, llama.cpp `d327bf1` source and build (see
-`../PLAN.md`).
+Xcode 26.3 (Instruments, `xctrace`, Metal debugger), Swift 6.2, uv (the project's Python;
+matplotlib comes from the `profiling` extra), and the llama.cpp checkout from
+`benchmarking/setup.py`. `llama_ops.py build` builds `test-backend-ops`,
+`test-export-graph-ops` and `llama-bench` into `<llama.cpp>/build-tests`.
 
-Built for this task: `test-backend-ops` in `.context/llama-build/` (from
-the same llama.cpp source, `-DLLAMA_BUILD_TESTS=ON`).
-
-Optional:
-- **Metal Toolchain** (`xcodebuild -downloadComponent MetalToolchain`, about
-  1 GB): offline `.metallib` with source/line info, if per-line shader
-  profiling doesn't work on runtime-compiled source.
-- `speedscope` is also available as an npm CLI, but the web app is enough.
-
----
-
-## Layout (planned)
-
-```
-ios_kernels/profiling/
-  PLAN.md                    <- this file
-  README.md                  <- how to profile, results (later)
-  Profiler.swift             <- Layer 1: per-dispatch timestamps, table + Perfetto JSON, --capture
-  build.sh                   <- builds the engine with Profiler.swift compiled in
-  templates/
-    metal-shader-timeline.tracetemplate   <- saved once from the Instruments GUI
-  xctrace_record.sh          <- record ours / llama-bench with the template
-  xctrace_to_perfetto.py     <- xctrace XML -> Chrome trace JSON + per-kernel table
-  compare.py                 <- ours vs llama.cpp per-kernel table
-  peak.swift + peak.metal    <- roofline microbenchmarks
-```
-
-Outside this folder: only the `op(...)` hook calls in the engine's encode
-functions (see Layer 1).
+Optional: the Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`, about 1 GB), for
+offline `.metallib` builds with source/line info, if per-line shader profiling doesn't work on
+runtime-compiled source.
 
 ---
 
 ## Checklist
 
-- [x] Survey profiling tools on this machine (Xcode 26.3, `xctrace` 26.0, Metal System Trace and GPU counter instruments present; no offline Metal compiler)
-- [x] Probe GPU counter sampling: stage boundary only, timestamp counter set only; CPU/GPU timestamps share a ns clock
-- [x] Record Metal System Trace of our engine from the CLI, export with `--toc`/`--xpath`, write a small XML row parser
-- [x] Try to enable shader timeline / counters by patching the stock template: rejected (see roadblocks)
-- [x] Read llama.cpp Metal profiling hooks (capture env var, concurrency/fusion toggles, debug groups, `test-backend-ops`, `test-export-graph-ops`)
-- [x] Prototype Layer 1 `--profile` (split encoders + timestamps -> table + Perfetto JSON), measure perturbation
-- [x] Build llama.cpp `test-backend-ops`
-- [ ] Save the custom Instruments template (needs one GUI session), commit it
-- [ ] Confirm the shader timeline gives per-kernel compute intervals on M3, for our engine and for `llama-bench`
-- [ ] `xctrace_to_perfetto.py` + `xctrace_record.sh`; open both engines' traces in Perfetto
-- [ ] llama.cpp per-op numbers with `test-backend-ops perf` on the exact model shapes
-- [ ] Roofline microbenchmarks (`peak_bw`, `peak_mma`)
-- [ ] Land Layer 1 (`profiling/Profiler.swift` + `op(...)` hooks in the engine, with op labels/debug groups), add folded-stack output and CPU encode spans
-- [ ] Xcode GPU capture of one decode token, both engines; check per-line shader profiling on runtime-compiled source
-- [ ] `compare.py` and a results section in a profiling README
+- [x] Survey tools; probe counter sampling; headless xctrace record/export; llama.cpp hooks
+- [x] Engine prototype with per-dispatch timestamps; measure the perturbation
+- [x] Objective 1: `kbench` + lib + examples (#12); llama.cpp baseline + `compare` + `knoise` (#16)
+- [x] Objective 2: pipelines, `RegionProfiler` docs, xctrace tools with `--validate` (#20)
+- [x] Objective 3: `kviz.py` (#27)
+- [x] Rework for `../CLAUDE.md`: bash -> Python, folder READMEs, present-tense docs (numbers live here), ruff-clean, PRs based on `main`
+- [ ] Save the Instruments counter/shader-timeline template from the GUI (needs a human, once)
+- [x] Objective 4 (#29), except the Instruments counter template, which needs the GUI step above
+- [x] Decide how objective 5 handles immutable kernel folders: replay (see key decisions)
+- [x] Objective 5 (#32)
 
-## Status (2026-10-24)
+## Status
 
-Investigation done, plan written, nothing in the repo implemented yet. The
-Layer 1 prototype works and reproduces the README's breakdown. Layer 2 is
-blocked on the one-time GUI template. llama.cpp per-op numbers are not
-collected yet.
+All five objectives are implemented and in review (#12, #16, #20, #27, #29, #32; merge in that
+order). Open: the Instruments counter template, which needs a one-time GUI step
+(`templates/README.md`). Next candidates: a per-threadgroup "logical clock" timeline (see below),
+then profiling the Gemma kernels once they land (new specs; the tools are model-agnostic).
 
 ## Roadblocks / risks log
 
-- **No per-dispatch GPU timestamps on Apple silicon** (stage boundary only).
-  Workaround: one encoder per dispatch in profile mode. Cost: +5.7% decode /
-  +1.5% prefill, and small kernels are inflated by per-encoder overhead.
-  Ablation mode is the cross-check. *Fundamental, workaround in place.*
-- **Default Metal System Trace is too coarse.** Only per-encoder intervals,
-  which for us is one ~19 ms bar per token. The shader timeline is off, and the
-  only counter recorded is "RT Unit Active" (363k samples, useless). Patching
-  the template plist (`shaderprofiler`, `counterprofile` keys) makes xctrace
-  fail with *"Selected counter profile is not supported on target device"*,
-  because counter profiles are device specific. Workaround: save a template
-  once from the Instruments GUI. *Blocking Layer 2 until done.*
-- **Serial vs concurrent dispatch.** llama.cpp lets kernels overlap; we
-  don't. Split-encoder profiles also serialize everything. So per-kernel *sums*
-  are comparable, but overlap and idle gaps can only be compared on xctrace
-  timelines of normal, unsplit runs.
-- **Runtime-compiled shaders, no offline Metal compiler.** May limit per-line
-  shader profiling in Xcode. Fallback: the optional Metal Toolchain download.
-  *Risk, not yet tested.*
-- **Measurement noise**: other apps' GPU work (Chrome, WindowServer show up in
-  every trace), battery power, cold page cache, clock ramp-up. Mitigated by
-  the hygiene rules above.
-- **Big exports**: about 113 MB of counter XML for a ~10 s recording, with
-  interned values. Keep recordings short and parse in a streaming way.
-- **`test-backend-ops` shape coverage**: the default perf cases may not
-  include our shapes. Plan: `test-export-graph-ops` -> `--test-file`.
-- **Incomplete web research**: a background docs search on Instruments/Xcode
-  details (counter-set names, per-line profiling requirements) stopped before
-  finishing. Everything marked *to verify* above still needs checking against
-  the real tools.
+- **Apple GPUs run independent encoders concurrently**, even across command buffers: two
+  roofline steps with no shared buffers overlapped completely (std 23-44%). `RegionProfiler`
+  chains timed regions with an `MTLFence`. After that: 0 overlaps, 0.3-1 us gaps, 1-3% spread
+  on a quiet GPU. *Fundamental, fixed.*
+- **No per-dispatch GPU timestamps** (stage boundary only): one encoder per timed region, with
+  `repeat` for tiny kernels. Cost on the full engine: +5.7% decode, +1.5% prefill. *Fundamental,
+  worked around.*
+- **Counter sample buffer limits**: 32 KB per buffer (4096 timestamps), about 32 alive at once.
+  *Constraint.*
+- **GPU-utilization metric quirks**: the first read after a pause is stale, and polling faster
+  than ~100 ms reads 100% even when idle. So: 250 ms polling, first sample dropped,
+  device-wide only. *Constraint.*
+- **Noisy roofline runs lowered the roof**: `peaks.json` now keeps the best value
+  (`--reset-peaks`). *Fixed.*
+- **The stock Metal System Trace is too coarse** (per-encoder intervals, shader timeline off,
+  only an "RT Unit Active" counter). Patching the template plist fails with *"Selected counter
+  profile is not supported on target device"*, even with this GPU's device ID and profiles 1-3.
+  Needs a template saved once from the Instruments GUI. *Blocks per-kernel llama.cpp
+  timelines and hardware counters.*
+- **No headless `.gputrace` analysis**: Xcode ships only GUI frameworks. *Accepted.*
+- **Serial vs concurrent dispatch**: llama.cpp overlaps kernels, we don't. Per-kernel sums are
+  comparable; overlap and gaps only on unsplit timelines.
+- **`test-backend-ops` method**: cache-warm reruns on the same buffers, and GB/s computed from
+  whole tensor sizes (absurd for `GET_ROWS`/`SET_ROWS`, e.g. 70,727 GB/s); `--output csv` drops
+  the timing columns (use `sql`); `test-export-graph-ops` exports at the model's full context
+  (131072) unless `--ctx` is given. *Documented in the README.*
+- **`ggml.h` enum parsing**: `GGML_OP_NONE = 0` has an initializer, and missing it shifted
+  every op ID by one. The parser now asserts that NONE comes first. *Fixed.*
+- **Instruments splits preempted encoders** into several intervals. The exporter sums them and
+  counts splits as noise. *Documented.*
+- **A relative `xctrace record --output`** once produced an unreadable trace. The recorder now
+  makes the path absolute and checks the result. *Fixed.*
+- **llama.cpp's encoders are unlabeled and coarse** (about 2 per decode token), so per-kernel
+  llama.cpp timelines need the shader-timeline template. *Open, objective 4.*
+- **Perfetto drops partially overlapping slices on one thread** (another process's vertex and
+  fragment work overlap). `kviz.py` splits such tracks into lanes. *Fixed.*
+- **Chrome blocks ui.perfetto.dev from fetching localhost traces** unless local network access
+  is allowed (a permission prompt in a normal browser). *Documented.*
+- **Repo rules changed mid-way** (`../CLAUDE.md`: Python not bash, a README per folder,
+  present-tense docs, no stacked PRs). The tools were ported, the docs rewritten, and the PRs
+  rebased onto `main`. *Done.*
+- **Ablation switches can change codegen**: an early `SKIP_STORE` folded the 16 accumulators
+  with `thread_elements()`, and the kernel got 3x *slower*. The switch now keeps all stores live
+  behind a runtime-false branch (`T == 0`). Rule in the README: an ablated variant that gets
+  slower means the switch changed more than its component. *Fixed.*
+- **GPU clock ramp-up after idle** made the first variant of a sweep noisy (p90 +48%). Warmup is
+  now time-based (`--warmup-ms`, default 200). *Fixed.*
+- **Small working sets measured per dispatch** were dominated by launch overhead and GPU
+  downclocking (0.5-2 MiB read at 15-31 GB/s). `read_passes` re-reads the buffer many times in one
+  dispatch (~256 MiB per dispatch). *Fixed.*
+- **llama.cpp capture needs Apple's `MTL_CAPTURE_ENABLED=1`.** Its error message names
+  `METAL_CAPTURE_ENABLED`, which does nothing. A whole-model capture is 2.3 GB, because it holds
+  the weights. *Verified, documented.*
+- **`test-backend-ops` reports host wall time**: it times `ggml_backend_graph_compute` on the
+  CPU, so CPU load elsewhere (e.g. a busy browser) inflated op times 2x while `kbench`'s GPU
+  timestamps stayed steady. `llama_ops.py bench --runs N` keeps each op's fastest run. *Mitigated.*
+- **Workspaces are archived mid-run**: another workspace's `.context/` (model files and the
+  llama.cpp checkout this workspace's test tools were built from) disappeared during a run, and
+  no Llama-3.2-1B artifacts remain on the machine (the project moved to Gemma 4). Results here
+  were recorded before that. Rebuilding needs `benchmarking/setup.py`. A shared `$DATA_DIR` (the
+  worktree-setup PR) would avoid it. *Noted.*
+- **No per-core GPU timeline on Apple GPUs**: Metal has no shader clock (a `clock()` intrinsic is
+  an open feature request) and no core/SM id, and Instruments shows GPU work per channel
+  (compute/vertex/fragment), not per core. The closest is a DIY "logical clock": each threadgroup
+  records an atomic ticket when it starts and ends, giving a Gantt chart of threadgroups in
+  ticket order (waves, tail effects, how many are in flight), not in real time. *Not built yet.*
+- **Required CI landed mid-way** (#22: ruff lint + format, kernel tree, no shell scripts,
+  forbidden markers, pytest). Branches created before it lacked the check scripts, so the
+  markers job failed with "No such file". They were rebased onto `main`, formatted with
+  `ruff format`, and every check was run locally before pushing. *Done.*
+- **Kernel folders are immutable once merged**, so objective 5 can't add hooks to the engine in
+  place. *Open; see key decisions.*
+- **Runtime-compiled shaders**: per-line Xcode profiling may need offline compilation with source
+  info (the optional Metal Toolchain). *Not yet tested.*
