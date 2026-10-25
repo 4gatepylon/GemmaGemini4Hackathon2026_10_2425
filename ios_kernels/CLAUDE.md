@@ -8,6 +8,41 @@ If anything here is wrong, outdated, or contradicts the code (paths, names, comm
 **stop immediately and tell the user** what is wrong. Don't work around it or silently fix it;
 fix this file together with the user first.
 
+## Worktree setup
+
+Large artifacts live in `<checkout>/.context/` (`DATA_DIR` in `surfaces/paths.py`), which is gitignored:
+
+- `.context/models/`: converted weights for every engine (what goes in it: `benchmarking/setup.py`).
+- `.context/deps/`: the llama.cpp checkout and build (the benchmark baseline).
+
+The main checkout (the folder that contains the repo's `.git` directory) holds the only copy, created
+there by `make -C ios_kernels setup`. Every other worktree (e.g. a Conductor workspace) symlinks those
+two folders instead of re-creating them. Link the two folders, not `.context` itself: the rest of a
+worktree's `.context/` (e.g. Conductor's notes) stays per-worktree.
+
+From the root of a worktree, before running anything in `ios_kernels/`:
+
+```sh
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"   # the main checkout
+mkdir -p .context
+ln -s "$MAIN/.context/models" .context/models
+ln -s "$MAIN/.context/deps" .context/deps
+```
+
+Then check:
+
+- `git status --short` shows nothing under `.context`. It is ignored through the repo's shared
+  `.git/info/exclude`; if it shows up, stop and tell the user instead of committing it.
+- `make -C ios_kernels smoke` starts a server on the shared weights and answers a question.
+
+Notes:
+
+- If `$MAIN/.context/models` doesn't exist, run `make -C ios_kernels setup` in the main checkout first.
+- Writes through the links land in the shared copy, which every worktree sees.
+- To remove the links: `rm .context/models .context/deps`, **without** a trailing slash. With a
+  trailing slash, `rm -r` follows the link and deletes the shared data.
+- Without symlinks, launcher commands also accept `--data-dir "$MAIN/.context"`.
+
 ## Adding a kernel
 
 1. Pick the model folder: `kernels/<model>/`, where `<model>` = HF repo id with `/` -> `__`
@@ -56,7 +91,8 @@ grep -rl '^parent: kernel_metal_f16_20261024-1620$' kernels/*/*/README.md   # ch
 
 - **Kernel folders are immutable** once merged. Iterate by copying. Only doc fixes are allowed in old folders.
 - **Large artifacts never go in git**: weights, GGUFs, and llama.cpp go in `<repo>/.context/`
-  (`$DATA_DIR`); build output goes in each kernel's gitignored `.build/`.
+  (`$DATA_DIR`, shared across worktrees: see Worktree setup); build output goes in each kernel's
+  gitignored `.build/`.
 - **Find kernels by path through `surfaces/paths.py`** (`resolve_kernel`, `KERNELS_DIR`), not by
   hard-coding folder names.
 - **Every folder has a `README.md`** whose top is a one-sentence description of the folder.
