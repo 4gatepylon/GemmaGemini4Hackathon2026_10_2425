@@ -76,10 +76,14 @@ can be an expression over `vars` and numeric `defines`:
 | `loop` | `{"name": "layer", "count": expr}`: run the step list `count` times per rep. Use `rotate` on weight buffers so each iteration has its own copy |
 | `steps[].group` | an extra nesting level for charts, e.g. `"attention"` / `"mlp"` |
 | `whole` | `true`: also time each rep as **one** encoder, the way an engine encodes a token, and compare that with the sum of the split steps. The difference is what profiling costs |
+| `sweep` | `{"NAME": [values...]}`: run the whole measurement once per combination (cartesian product) of define/var values. `--sweep NAME=V1,V2` on the command line replaces it |
+| `variants` | `[{"name": "no_mma", "set": {"SKIP_MMA": 1}}, ...]`: named variants instead of a sweep. The first one is the baseline the others are compared against |
 
 Expressions support `+ - * / %`, parentheses, and `min max ceil floor round ceildiv pow log2`.
 Integer contexts (counts, grids) fail loudly when a result isn't an integer.
-`kbench SPEC --list` prints the resolved spec without running it.
+`kbench SPEC --list` prints the resolved spec(s) without running them. `--warmup-ms` (default
+200) keeps warming up until the GPU has been busy that long, because after an idle period its
+clocks ramp up and would otherwise slow the first variant's reps.
 
 ## How timing works
 
@@ -282,3 +286,50 @@ uv run $K table RUN.json --md                                       # the result
 - `folded` aggregates `stack` paths (`layer 7` -> `layer` unless `--keep-indices`) into
   `a;b;c <ns>` lines for speedscope or `flamegraph.pl`.
 - PNG commands need matplotlib (the `profiling` extra) and take `--dark` for the dark palette.
+
+## Kernel internals and hardware metrics
+
+### Ablation: what each part of a kernel costs
+
+Give a kernel `#define` switches that remove one component each, list them as `variants`, and
+`kbench` prints every variant's time with its difference from the baseline (the first variant).
+`examples/gemm_components/` does this for a `simdgroup_matrix` GEMM: global loads, MMA and
+stores each removed in turn.
+
+- A component's cost is the difference, and costs overlap on a GPU, so they need not add up.
+- A switch must remove only its component. Keep everything the variant still computes
+  observable (written to memory, or kept live behind a runtime-false branch), or the compiler
+  deletes it. Also check that a switch doesn't change code generation elsewhere: an ablated
+  variant that gets *slower* is the sign.
+- `kbench` prints each kernel's compiler limits ("pipeline stats"): max threads per threadgroup
+  (below 1024 means register pressure), SIMD width, and static threadgroup memory. They are also
+  in the `kprof` results' `extra`.
+
+### Cache levels from timing
+
+`examples/roofline/working_set.json` sweeps the size of a buffer that one dispatch re-reads many
+times. Sizes that fit in a cache level read at that level's bandwidth, so the curve drops where
+each cache ends. Plot any sweep with `kviz.py sweep`:
+
+```sh
+profiling/.build/kbench profiling/examples/roofline/working_set.json --out ws.json
+uv run --extra profiling profiling/tools/kviz.py sweep ws.json --x MB --log
+```
+
+![working set](docs/working-set.png)
+
+### Hardware counters (occupancy, limiters, cache hit rates)
+
+Metal exposes no hardware counters to programs (`MTLCounterSet` on Apple GPUs is timestamps
+only), so they come from Apple's tools:
+
+- **Xcode GPU capture**, for one dispatch at a time. `kbench SPEC --capture out.gputrace` writes
+  a capture of one rep (it sets `MTL_CAPTURE_ENABLED=1` itself). Open the file in Xcode, which
+  shows per-dispatch counters, limiters, occupancy and the shader cost per line. For llama.cpp,
+  run any tool with `MTL_CAPTURE_ENABLED=1 GGML_METAL_CAPTURE_COMPUTE=1`: it writes
+  `/tmp/perf-metal-<pid>.gputrace`, with each op in a debug group. Captures include buffer
+  contents, so a whole-model llama.cpp capture holds the weights (gigabytes).
+- **Instruments counters over time, headless.** Once `templates/kprof.tracetemplate` exists
+  (saved once from the Instruments GUI, see `templates/README.md`), `xctrace_record.py` uses it,
+  and `xctrace_export.py --counters` puts every counter sample in the `kprof` file's `counters`.
+  `kviz.py perfetto` shows them as counter tracks under the GPU timeline.

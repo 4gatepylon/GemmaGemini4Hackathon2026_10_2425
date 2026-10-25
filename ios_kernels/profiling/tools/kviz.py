@@ -7,6 +7,7 @@
                    (--start-ms/--end-ms count from the first event on the main GPU track)
   kviz.py flame    FILE [--track T] [--dark]                 aggregate icicle (flame graph) PNG
   kviz.py share    FILE [--track T] [--dark]                 where the time goes: one bar per kernel, PNG
+  kviz.py sweep    FILE --x VAR [--y gbps|gflops|median_us] [--log] [--dark]   a metric across sweep variants, PNG
   kviz.py table    FILE [--md]                               the results as a table (the charts' table view)
 
 Events nest by their `stack` (e.g. rep 0 > layer 3 > attention > qkv). The
@@ -358,7 +359,13 @@ def title(fig, d, what, t):
     dev = (m.get("device") or {}).get("name", "")
     sub = f"{m.get('tool')} on {dev}, {m.get('created', '')[:19]}  |  {kprof.noise_line(d.get('noise'))}"
     fig.text(
-        0.01, 0.985 - 0.035 * (8 / fig.get_figheight()), sub[:220], ha="left", va="top", fontsize=7.5, color=t["ink2"]
+        0.01,
+        0.985 - 0.035 * (8 / fig.get_figheight()),
+        sub[: int(fig.get_figwidth() * 15)],
+        ha="left",
+        va="top",
+        fontsize=7.5,
+        color=t["ink2"],
     )
 
 
@@ -626,6 +633,106 @@ def cmd_share(args):
     print(f"wrote {out}")
 
 
+def parse_variant(v):
+    """'MB=0.25,NR=2' -> {'MB': '0.25', 'NR': '2'}; named variants -> {}."""
+    out = {}
+    for part in (v or "").split(","):
+        k, eq, val = part.partition("=")
+        if eq:
+            out[k.strip()] = val.strip()
+    return out
+
+
+def cmd_sweep(args):
+    plt, t = mpl(args.theme)
+    d = kprof.load(args.file)
+    series = defaultdict(list)  # (step, other vars) -> [(x, y)]
+    for r in d["results"]:
+        kv = parse_variant(r.get("variant"))
+        if args.x not in kv or r.get(args.y) is None:
+            continue
+        rest = ", ".join(f"{k}={v}" for k, v in sorted(kv.items()) if k != args.x)
+        series[(r["name"], rest)].append((float(kv[args.x]), r[args.y]))
+    if not series:
+        sys.exit(f"no results with a variant var {args.x!r} and a {args.y!r} value")
+    keys = list(series)
+    fig, ax = plt.subplots(figsize=(10, 5.2))
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.84, bottom=0.2 if len(keys) > 1 else 0.13)
+    for i, key in enumerate(keys[:8]):
+        pts = sorted(series[key])
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        color = t["series"][i]
+        ax.plot(xs, ys, color=color, linewidth=2, solid_capstyle="round", solid_joinstyle="round", zorder=3)
+        ax.scatter(xs, ys, s=36, color=color, edgecolors=t["surface"], linewidths=2, zorder=4)
+        top = max(range(len(ys)), key=lambda j: ys[j])
+        ax.annotate(
+            f"{ys[top]:,.0f}",
+            (xs[top], ys[top]),
+            textcoords="offset points",
+            xytext=(0, 8),
+            ha="center",
+            fontsize=8,
+            color=t["ink2"],
+        )
+        ax.annotate(
+            f"{ys[-1]:,.0f}",
+            (xs[-1], ys[-1]),
+            textcoords="offset points",
+            xytext=(0, 8),
+            ha="center",
+            fontsize=8,
+            color=t["ink2"],
+        )
+    pk = kprof.peaks()
+    roof = {"gbps": pk.get("bandwidth_gbps"), "gflops": pk.get("flops_gflops")}.get(args.y)
+    if roof:
+        ax.axhline(roof, color=t["muted"], linewidth=1, zorder=2)
+        ax.annotate(
+            f"measured roof {roof:,.0f}",
+            (0.0, roof),
+            xycoords=("axes fraction", "data"),
+            textcoords="offset points",
+            xytext=(4, 4),
+            ha="left",
+            fontsize=7.5,
+            color=t["muted"],
+        )
+    if args.log:
+        ax.set_xscale("log", base=2)
+        xs_all = sorted({x for v in series.values() for x, _ in v})
+        ax.set_xticks(xs_all)
+        ax.set_xticklabels([f"{x:g}" for x in xs_all])
+        ax.minorticks_off()
+    ax.set_ylim(bottom=0)
+    ax.grid(axis="y", color=t["grid"], linewidth=0.8)
+    ax.set_axisbelow(True)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    unit = {"gbps": "GB/s", "gflops": "GFLOP/s", "median_us": "median us per dispatch"}.get(args.y, args.y)
+    ax.set_xlabel(args.x)
+    ax.set_ylabel(unit)
+    title(fig, d, f"{unit} vs {args.x}", t)
+    if len(keys) > 1:
+        from matplotlib.lines import Line2D
+
+        handles = [
+            Line2D([0], [0], color=t["series"][i], linewidth=2, label=f"{k[0]} {k[1]}".strip())
+            for i, k in enumerate(keys[:8])
+        ]
+        fig.legend(
+            handles=handles,
+            loc="lower left",
+            bbox_to_anchor=(0.01, 0.0),
+            ncol=min(len(handles), 4),
+            frameon=False,
+            labelcolor=t["ink2"],
+            fontsize=8,
+        )
+    out = out_path(args, args.file, f".sweep-{args.x}.png")
+    fig.savefig(out, dpi=args.dpi)
+    print(f"wrote {out}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -654,6 +761,14 @@ def main():
             g.add_argument("--end-ms", type=float)
         if name == "flame":
             g.add_argument("--keep-indices", action="store_true")
+    w = sub.add_parser("sweep")
+    w.add_argument("file")
+    w.add_argument("--x", required=True, help="the sweep variable on the x axis, e.g. MB")
+    w.add_argument("--y", default="gbps", help="result field: gbps, gflops, median_us, ... (default gbps)")
+    w.add_argument("--log", action="store_true", help="log2 x axis")
+    w.add_argument("--out")
+    w.add_argument("--dark", dest="theme", action="store_const", const="dark", default="light")
+    w.add_argument("--dpi", type=int, default=150)
     t = sub.add_parser("table")
     t.add_argument("file")
     t.add_argument("--md", action="store_true")
@@ -664,6 +779,7 @@ def main():
         "gantt": cmd_gantt,
         "flame": cmd_flame,
         "share": cmd_share,
+        "sweep": cmd_sweep,
         "table": cmd_table,
     }[args.cmd](args)
 

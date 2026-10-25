@@ -105,8 +105,44 @@ final class BenchSpec {
 
     var dir: String { (path as NSString).deletingLastPathComponent }
 
+    /// The variants to run: `cliSweeps` (cartesian product) if given, else the spec's named
+    /// `variants` ([{"name": ..., "set": {NAME: value}}]), else its `sweep` ({NAME: [values]},
+    /// cartesian), else the spec as is. Each variant is a label (nil: derived from the sets)
+    /// plus the overrides it applies.
+    func variants(cliSweeps: [(String, [String])] = []) throws -> [(label: String?, sets: [(String, String)])] {
+        func text(_ v: Any) -> String {
+            if let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() {
+                let d = n.doubleValue
+                return d == d.rounded() && abs(d) < 1e15 ? String(Int(d)) : String(d)
+            }
+            return "\(v)"
+        }
+        func product(_ axes: [(String, [String])]) -> [[(String, String)]] {
+            axes.reduce([[]]) { acc, axis in acc.flatMap { prefix in axis.1.map { prefix + [(axis.0, $0)] } } }
+        }
+        if !cliSweeps.isEmpty { return product(cliSweeps).map { (nil, $0) } }
+        if let vs = json["variants"] as? [[String: Any]] {
+            return try vs.enumerated().map { i, v in
+                guard let set = v["set"] as? [String: Any] else {
+                    throw SpecError(message: "\((path as NSString).lastPathComponent): variants[\(i)] needs a \"set\" object")
+                }
+                return (v["name"] as? String, set.sorted { $0.key < $1.key }.map { ($0.key, text($0.value)) })
+            }
+        }
+        if let sw = json["sweep"] as? [String: Any] {
+            let axes = try sw.sorted { $0.key < $1.key }.map { k, v -> (String, [String]) in
+                guard let vals = v as? [Any], !vals.isEmpty else {
+                    throw SpecError(message: "\((path as NSString).lastPathComponent): sweep.\(k) must be a non-empty array")
+                }
+                return (k, vals.map(text))
+            }
+            return product(axes).map { (nil, $0) }
+        }
+        return [(nil, [])]
+    }
+
     /// Evaluate the spec with `overrides` (name -> value) applied to defines or vars.
-    func resolve(overrides: [(String, String)] = []) throws -> ResolvedSpec {
+    func resolve(overrides: [(String, String)] = [], label: String? = nil) throws -> ResolvedSpec {
         func fail(_ m: String) -> SpecError { SpecError(message: "\((path as NSString).lastPathComponent): \(m)") }
 
         // defines (kept as text for the shader) and vars (numbers or expressions)
@@ -253,7 +289,7 @@ final class BenchSpec {
             reps: try int(json["reps"], "reps", default: 20),
             roof: json["roof"] as? String,
             fastMath: json["fast_math"] as? Bool ?? true,
-            variant: overrides.isEmpty ? "default" : overrides.map { "\($0.0)=\($0.1)" }.joined(separator: ","))
+            variant: label ?? (overrides.isEmpty ? "default" : overrides.map { "\($0.0)=\($0.1)" }.joined(separator: ",")))
     }
 }
 

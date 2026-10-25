@@ -1,6 +1,7 @@
 // Roofline microbenchmarks: measure this GPU's practical peaks, so other
 // results can be reported as "% of measured roof" instead of spec-sheet numbers.
 //   read_bw / copy_bw / write_bw: streaming memory bandwidth (float4, grid-stride)
+//   read_passes: re-reads one buffer many times (bandwidth vs working-set size)
 //   mma_peak: simdgroup_matrix FP16 x FP16 -> FP32 multiply-accumulate throughput
 //   fma_peak: scalar FP32 FMA throughput
 // Results are kept alive by stores the compiler can't prove dead.
@@ -30,6 +31,30 @@ kernel void read_bw(device const float4* src  [[buffer(0)]],
     for (uint u = 0; u < UNROLL; ++u) t += acc[u];
     float s = t.x + t.y + t.z + t.w;
     if (s == -1.2345e30f) sink[gid & 1023] = s;  // never true for our inputs, keeps the loads
+}
+
+// Reads the same buffer `passes` times in one dispatch: with a small buffer the
+// re-reads hit in cache, so bandwidth vs buffer size shows the cache levels. Each pass
+// scales the accumulators first, so the passes can't be folded into one.
+kernel void read_passes(device const float4* src    [[buffer(0)]],
+                        device float*        sink   [[buffer(1)]],
+                        constant uint&       n4     [[buffer(2)]],
+                        constant uint&       passes [[buffer(3)]],
+                        uint gid [[thread_position_in_grid]],
+                        uint nth [[threads_per_grid]]) {
+    float4 acc[UNROLL];
+    for (uint u = 0; u < UNROLL; ++u) acc[u] = 0.0f;
+    for (uint p = 0; p < passes; ++p) {
+        for (uint u = 0; u < UNROLL; ++u) acc[u] *= 0.5f;
+        uint i = gid;
+        for (; i + (UNROLL - 1) * nth < n4; i += UNROLL * nth)
+            for (uint u = 0; u < UNROLL; ++u) acc[u] += src[i + u * nth];
+        for (; i < n4; i += nth) acc[0] += src[i];
+    }
+    float4 t = 0.0f;
+    for (uint u = 0; u < UNROLL; ++u) t += acc[u];
+    float s = t.x + t.y + t.z + t.w;
+    if (s == -1.2345e30f) sink[gid & 1023] = s;
 }
 
 kernel void copy_bw(device const float4* src [[buffer(0)]],
