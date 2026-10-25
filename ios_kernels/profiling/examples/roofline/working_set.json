@@ -1,0 +1,19 @@
+{
+  "name": "working set",
+  "description": "Read bandwidth vs working-set size. One dispatch re-reads the same buffer PASSES times (about 256 MiB of traffic per dispatch at any size), so sizes that fit in a cache level read at that level's bandwidth; the drops show where each cache ends.",
+  "source": "roofline.metal",
+  "defines": {"UNROLL": 4},
+  "vars": {"MB": 64, "N4": "MB * 65536", "THREADS": "min(18 * 4096, N4)", "PASSES": "max(1, ceil(256 / MB))"},
+  "sweep": {"MB": [0.25, 0.5, 1, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 128, 256]},
+  "buffers": {
+    "src":  {"type": "float", "count": "4 * N4", "init": "random"},
+    "sink": {"type": "float", "count": 1024}
+  },
+  "steps": [
+    {"name": "read", "kernel": "read_passes",
+     "bind": [{"buf": "src"}, {"buf": "sink"}, {"u32": "N4"}, {"u32": "PASSES"}],
+     "grid": ["THREADS"], "threads": [256], "bytes": "PASSES * N4 * 16"}
+  ],
+  "warmup": 2,
+  "reps": 10
+}

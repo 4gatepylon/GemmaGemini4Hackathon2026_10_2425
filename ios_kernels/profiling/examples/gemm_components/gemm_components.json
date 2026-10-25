@@ -1,0 +1,27 @@
+{
+  "name": "gemm components",
+  "description": "Cost of each component of a simdgroup GEMM, by difference from the full kernel: full - no_loads ~ global loads, full - no_mma ~ simdgroup loads + MMA, full - no_store ~ output stores. A component's cost overlaps with the others on a GPU, so the differences need not add up to the full time.",
+  "source": "gemm_components.metal",
+  "defines": {"SKIP_LOADS": 0, "SKIP_MMA": 0, "SKIP_STORE": 0},
+  "vars": {"T": 512, "M": 2048, "K": 2048},
+  "variants": [
+    {"name": "full", "set": {}},
+    {"name": "no_loads", "set": {"SKIP_LOADS": 1}},
+    {"name": "no_mma", "set": {"SKIP_MMA": 1}},
+    {"name": "no_store", "set": {"SKIP_STORE": 1}},
+    {"name": "mma_only", "set": {"SKIP_LOADS": 1, "SKIP_STORE": 1}}
+  ],
+  "buffers": {
+    "W": {"type": "half",  "count": "M * K", "init": "random"},
+    "X": {"type": "half",  "count": "T * K", "init": "random"},
+    "Y": {"type": "float", "count": "T * M"}
+  },
+  "steps": [
+    {"name": "gemm", "kernel": "gemm_components",
+     "bind": [{"buf": "W"}, {"buf": "X"}, {"buf": "Y"}, {"u32": "T"}, {"u32": "M"}, {"u32": "K"}],
+     "threadgroups": ["M / 64", "T / 64"], "threads": [128],
+     "bytes": "M * K * 2 + T * K * 2 + T * M * 4", "flops": "2 * T * M * K"}
+  ],
+  "warmup": 3,
+  "reps": 20
+}
