@@ -18,9 +18,9 @@ and rationale are in [../../../PLAN.md](../../../PLAN.md).
 | `convert_weights.py` | HF safetensors -> flat mmap-able FP16 file (fused QKV, JSON header) |
 | `kernels.metal` | all kernels: embed, rmsnorm, matvec, fused SwiGLU matvec, RoPE + KV write, attention, argmax, `simdgroup_matrix` GEMM, fused SwiGLU GEMM. Compiled at runtime |
 | `main.swift` | engine: mmaps weights into one MTLBuffer, encodes the forward pass, GPU-side greedy sampling with pipelined command buffers, benchmark mode, `--serve` mode |
-| `build.sh` | `swiftc -O` -> `.build/llm` |
+| `build.py` | `swiftc -O` -> `.build/llm` |
 
-**Results** (Apple M3 Pro, `benchmarking/bench.sh`): pp512 ~2050 tok/s (llama.cpp ~2650,
+**Results** (Apple M3 Pro, `benchmarking/bench.py`): pp512 ~2050 tok/s (llama.cpp ~2650,
 77%), tg128 ~52–53 tok/s (llama.cpp ~50–52, parity, ~86% of peak memory bandwidth).
 Matches HF transformers: 32/32 greedy tokens identical, logits max |diff| 0.011.
 

@@ -1,5 +1,5 @@
 """The mlx-lm runner gives the same greedy text (cross-checks the Runner seam with a second
-backend). Skipped unless `uv sync --extra mlx` was run and setup.sh created the MLX model."""
+backend). Skipped unless `uv sync --extra mlx` was run and setup.py created the MLX model."""
 
 import importlib.util
 import threading

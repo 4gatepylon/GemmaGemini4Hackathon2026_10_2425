@@ -67,7 +67,7 @@ There are two seams. They are the only places that need to stay stable:
 
 **Kernel folder contract:**
 - `kernel.json`: `{"hf_repo", "weights" (file name in $DATA_DIR/models), "build", "binary", "convert"}`
-- `build` script: produces `binary`. `KernelRunner` rebuilds when `*.swift` is newer than the binary.
+- `build` script: an executable Python script (shebang, `chmod +x`) that produces `binary`. `KernelRunner` rebuilds when `*.swift` is newer than the binary.
 - `convert` script: `--repo <hf_repo> --out <weights path>`
 - `binary` accepts `--weights PATH --serve --max-ctx N` and speaks the protocol below.
   For `benchmarking/` it also needs `--bench-pp N --bench-tg N --reps R` and
@@ -121,7 +121,7 @@ starts llama.cpp's on port 8080).
   manifest. The surfaces themselves are model-agnostic.
 - **Localhost only, no auth** (binds `127.0.0.1` by default, API key ignored). Don't expose it.
 - **End-to-end HTTP streaming is about 48 tok/s vs 52–53 raw**, because of per-token Python
-  detokenization and JSON/SSE overhead. Fine for humans, so use `benchmarking/bench.sh` for
+  detokenization and JSON/SSE overhead. Fine for humans, so use `benchmarking/bench.py` for
   performance numbers, never the server.
 - **macOS + Apple GPU only** for the kernel runner. The fake runner and API tests run anywhere.
 

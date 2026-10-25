@@ -64,7 +64,7 @@ Generated artifacts (in `.context/models/`, ~2.5 GB each):
 - `llama1b_f16.gguf` (llama.cpp format, from `convert_hf_to_gguf.py --outtype f16`)
 - `llama1b_mlx_f16/` (MLX format, from `mlx_lm convert --dtype float16`)
 
-All of these are produced by `make setup` (`ios_kernels/benchmarking/setup.sh`).
+All of these are produced by `make setup` (`ios_kernels/benchmarking/setup.py`).
 
 Optional downloads that would help (not blocking, tell me if you want them):
 - **Metal Toolchain** (`xcodebuild -downloadComponent MetalToolchain`, about 1 GB):
@@ -182,7 +182,7 @@ Likely optimization roadmap after the MVP, roughly in order of expected payoff:
 new `_YYYYMMDD-HHMM` name and change it. As long as it keeps the folder contract
 (`kernel.json` manifest, build script, weight converter, and a binary with the
 `--serve` protocol + benchmark flags), it automatically becomes the default for
-the server, `bench.sh`, `reference.py` and the e2e tests, and old versions stay
+the server, `bench.py`, `reference.py` and the e2e tests, and old versions stay
 runnable for A/B comparisons. A different *runtime* (MLX, Core ML, ...) plugs in
 one level up as a `Runner` class. Details:
 [`surfaces/DESIGN_AND_LIMITATIONS.md`](surfaces/DESIGN_AND_LIMITATIONS.md#how-to-swap-things).
@@ -207,16 +207,15 @@ ios_kernels/
         convert_weights.py    <- safetensors -> flat fp16 .bin + JSON header
         kernels.metal         <- all Metal kernels (compiled at runtime)
         main.swift            <- engine: load, forward pass, generate, bench, --serve
-        build.sh              <- swiftc build (-> .build/llm, gitignored)
+        build.py              <- swiftc build (-> .build/llm, gitignored)
   benchmarking/
-    common.sh                 <- kernel selection (arg / $KERNEL / newest) + paths
-    setup.sh                  <- builds llama.cpp, converts weights (into .context/), builds kernel
-    bench.sh                  <- ours vs llama.cpp vs MLX
+    setup.py                  <- builds llama.cpp, converts weights (into .context/), builds kernel
+    bench.py                  <- ours vs llama.cpp vs MLX
     reference.py              <- HF transformers correctness check
   surfaces/
     DESIGN_AND_LIMITATIONS.md <- architecture, protocol spec, how to swap kernels/runtimes, limitations
     README.md                 <- usage
-    paths.py                  <- layout + newest-kernel discovery
+    paths.py                  <- layout (kernels, data dir, llama.cpp) + newest-kernel discovery
     runners/                  <- Runner interface + kernel / mlx / fake runners
     openai_server/server.py   <- FastAPI OpenAI-compatible server (`uv run openai-server`)
     cli_client/chat.py        <- terminal chat (`uv run cli-chat`)
@@ -238,7 +237,7 @@ ios_kernels/
 - [x] Benchmark decode vs llama.cpp `tg128` (+ MLX): **52.1 vs 49.5–52.2 tok/s (parity)**
 - [x] Quick tuning sweep of matvec tunables: all configs land at 52–53 tok/s, so we're at the bandwidth wall for FP16
 - [x] Prefill GEMM (`simdgroup_matrix`) + benchmark vs `pp512`: **2050 vs 2650 tok/s (77% of llama.cpp)**
-- [x] `setup.sh` / `bench.sh` / `build.sh` for one-command reproduction
+- [x] `setup.py` / `bench.py` / `build.py` for one-command reproduction (originally shell scripts)
 - [x] Write results + reproduction steps in README.md
 - [x] Milestone 2: restructure into `kernels/` (versioned folders + `kernel.json`), `benchmarking/`, `surfaces/`. Make `ios_kernels/` a uv project
 - [x] Kernel `--serve` mode: resident process, JSON-lines protocol, streaming, stop ids, warmup, exits on stdin EOF

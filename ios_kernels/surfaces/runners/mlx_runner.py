@@ -20,7 +20,7 @@ _END = object()
 
 class MLXRunner(Runner):
     def __init__(self, model: str | None = None):
-        model = model or str(MODELS_DIR / "llama1b_mlx_f16")  # created by benchmarking/setup.sh
+        model = model or str(MODELS_DIR / "llama1b_mlx_f16")  # created by benchmarking/setup.py
         self.model_id = f"mlx:{Path(model).name}"
         self._jobs: queue.Queue = queue.Queue()
         threading.Thread(target=self._worker, name="mlx", daemon=True).start()

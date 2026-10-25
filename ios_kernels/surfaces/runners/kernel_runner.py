@@ -1,7 +1,7 @@
 """Runner for our hand-written kernels (any folder under ios_kernels/kernels/<model>/).
 
 Each kernel folder is self-describing via kernel.json:
-    {"hf_repo": ..., "weights": <file in DATA_DIR/models>, "build": "build.sh", "binary": ".build/llm"}
+    {"hf_repo": ..., "weights": <file in DATA_DIR/models>, "build": "build.py", "binary": ".build/llm"}
 and its binary implements the `--serve` JSON-lines protocol (see surfaces/README.md).
 This runner builds the binary if needed, keeps it running as a subprocess, and does
 tokenization / chat templating / detokenization in Python.
@@ -27,7 +27,7 @@ class KernelRunner(Runner):
 
         weights_path = Path(weights) if weights else MODELS_DIR / manifest["weights"]
         if not weights_path.exists():
-            raise FileNotFoundError(f"{weights_path} missing; run ios_kernels/benchmarking/setup.sh")
+            raise FileNotFoundError(f"{weights_path} missing; run ios_kernels/benchmarking/setup.py")
 
         self.tok = ChatTokenizer(manifest["hf_repo"])
         # stderr is inherited so kernel logs show up in the server's terminal.

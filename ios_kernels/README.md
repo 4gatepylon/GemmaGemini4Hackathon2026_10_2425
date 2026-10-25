@@ -12,7 +12,7 @@ ios_kernels/                 a uv project (pyproject.toml)
   kernels/                   one folder per model, then one immutable folder per engine version; newest is the default
     unsloth__Llama-3.2-1B-Instruct/
       kernel_metal_f16_20261024-1620/   hand-written Metal + Swift, Llama-3.2-1B FP16
-  benchmarking/              setup.sh (llama.cpp + weights), bench.sh, reference.py (correctness)
+  benchmarking/              setup.py (llama.cpp + weights), bench.py, reference.py (correctness)
   utils/                     helper scripts (`uv run utils/kernel_lineage.py`: kernel lineage tree per model)
   surfaces/                  try it by hand: OpenAI-compatible server + CLI chat (Python)
     DESIGN_AND_LIMITATIONS.md   how surfaces, runners and kernels plug together, and what they don't do
@@ -46,7 +46,7 @@ directly is easiest: `uv run ios_kernels_launcher.py ask "Why is the sky blue?"`
 | command | what | useful flags |
 |---|---|---|
 | `help` | list commands (default target) | `args=<command>` for one command's flags |
-| `setup` | one-time: llama.cpp, weights (our .bin, GGUF, MLX), kernel build | `--kernel` |
+| `setup` | one-time: llama.cpp, weights (our .bin, GGUF, MLX), kernel build (`benchmarking/setup.py`) | `--kernel` |
 | `build` | rebuild the kernel binary | `--kernel` |
 | `serve` | OpenAI-compatible server, newest kernel by default | `--kernel` `--runner {kernel,fake,mlx}` `--port` `--host` |
 | `serve-fake` / `serve-mlx` | the same server with the echo / mlx-lm backend | `--port` |
@@ -55,7 +55,7 @@ directly is easiest: `uv run ios_kernels_launcher.py ask "Why is the sky blue?"`
 | `ask` | one-shot question: `make ask args="why is the sky blue"` | same as `chat` |
 | `smoke` | start a server, ask one question, shut down (~5 s) | `--runner` `--kernel` `--prompt` |
 | `test` / `test-fast` | all tests / only the no-GPU ones (~2 s) | extra args go to pytest |
-| `bench` | ours vs llama.cpp vs MLX | `--kernel` `--pp` `--tg` `--reps` |
+| `bench` | ours vs llama.cpp vs MLX (`benchmarking/bench.py`) | `--kernel` `--pp` `--tg` `--reps` |
 | `bench-ours` | our engine only, for quick before/after numbers | same, plus `--define MV_NR=2` |
 | `reference` | logits + greedy tokens vs HF transformers | `--kernel` |
 | `kernels` | list kernel versions, mark the default (newest) | |
@@ -92,4 +92,4 @@ after the 512-token prompt, the others from an empty cache.
   range ±27), same top-5, 32/32 greedy tokens identical. Also checked end to end through
   the server (`surfaces/tests/test_kernel_e2e.py`).
 - **Through the server** (manual testing), streaming runs at about 48 tok/s with ~50 ms
-  time-to-first-token. Use `bench.sh` for performance numbers, not the server.
+  time-to-first-token. Use `bench.py` for performance numbers, not the server.

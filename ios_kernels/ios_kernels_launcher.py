@@ -4,12 +4,11 @@
     make <command> [args="--flag value ..."]              (the Makefile is shorthand for this)
     uv run ios_kernels_launcher.py help <command>         (flags for one command)
 
-It wraps the existing tools (benchmarking/*.sh, the openai-server / cli-chat entry points,
+It wraps the existing tools (benchmarking/*.py, the openai-server / cli-chat entry points,
 pytest, llama.cpp) so nobody has to remember paths or environment variables.
 """
 
 import argparse
-import json
 import os
 import re
 import shutil
@@ -34,10 +33,10 @@ def paths():
     return p
 
 
-def run(cmd: list, env: dict | None = None, cwd: Path = HERE) -> int:
+def run(cmd: list, cwd: Path = HERE) -> int:
     """Run a command in the foreground. Ctrl-C stops the child (it gets SIGINT too) without a traceback."""
     print("+ " + " ".join(str(c) for c in cmd), file=sys.stderr, flush=True)
-    proc = subprocess.Popen([str(c) for c in cmd], cwd=cwd, env={**os.environ, **(env or {})})
+    proc = subprocess.Popen([str(c) for c in cmd], cwd=cwd)
     while True:
         try:
             return proc.wait()
@@ -47,10 +46,6 @@ def run(cmd: list, env: dict | None = None, cwd: Path = HERE) -> int:
 
 def kernel_dir(name: str | None) -> Path:
     return paths().resolve_kernel(name)
-
-
-def manifest(kdir: Path) -> dict:
-    return json.loads((kdir / "kernel.json").read_text())
 
 
 def base_url(args) -> str:
@@ -78,15 +73,20 @@ def free_port() -> int:
 
 # --------------------------------------------------------------------------- commands
 
+def bench_python() -> list:
+    """Python with the `bench` extra (torch, mlx-lm, ...) for the benchmarking/ scripts."""
+    return ["uv", "run", "--project", HERE, "--extra", "bench", "python"]
+
+
 def cmd_setup(args, extra) -> int:
     """One-time: build llama.cpp, convert weights (~7.5 GB into the data dir), build the kernel."""
-    return run([HERE / "benchmarking/setup.sh", kernel_dir(args.kernel)])
+    return run([*bench_python(), HERE / "benchmarking/setup.py", "--kernel", kernel_dir(args.kernel)])
 
 
 def cmd_build(args, extra) -> int:
     """Build the kernel binary (Swift + runtime-compiled Metal)."""
     kdir = kernel_dir(args.kernel)
-    return run([kdir / manifest(kdir)["build"]])
+    return run([kdir / paths().load_manifest(kdir)["build"]])
 
 
 def server_cmd(args, extra, runner: str) -> list:
@@ -117,7 +117,7 @@ def cmd_serve_mlx(args, extra) -> int:
 def cmd_serve_llamacpp(args, extra) -> int:
     """llama.cpp's own llama-server on the same FP16 model (default port 8080), for side-by-side chats."""
     p = paths()
-    llama = p.DATA_DIR / "deps/llama.cpp"
+    llama = p.LLAMA_DIR
     gguf = p.MODELS_DIR / "llama1b_f16.gguf"
     server = llama / "build/bin/llama-server"
     if not gguf.exists():
@@ -176,15 +176,15 @@ def cmd_test_fast(args, extra) -> int:
 
 
 def cmd_bench(args, extra) -> int:
-    """Ours vs llama.cpp vs MLX (benchmarking/bench.sh)."""
-    env = {"PP": str(args.pp), "TG": str(args.tg), "REPS": str(args.reps)}
-    return run([HERE / "benchmarking/bench.sh", kernel_dir(args.kernel), *extra], env=env)
+    """Ours vs llama.cpp vs MLX (benchmarking/bench.py)."""
+    return run([*bench_python(), HERE / "benchmarking/bench.py", "--kernel", kernel_dir(args.kernel),
+                "--pp", args.pp, "--tg", args.tg, "--reps", args.reps])
 
 
 def cmd_bench_ours(args, extra) -> int:
     """Our engine only: quick before/after numbers while iterating. --define sets kernel tunables."""
     kdir = kernel_dir(args.kernel)
-    m = manifest(kdir)
+    m = paths().load_manifest(kdir)
     if code := run([kdir / m["build"]]):
         return code
     defines = [x for d in args.define for x in ("--define", d)]
@@ -194,8 +194,7 @@ def cmd_bench_ours(args, extra) -> int:
 
 def cmd_reference(args, extra) -> int:
     """Correctness: compare the kernel's logits and greedy tokens with HF transformers."""
-    return run(["uv", "run", "--project", HERE, "--extra", "bench", "python",
-                HERE / "benchmarking/reference.py", "--kernel", kernel_dir(args.kernel), *extra])
+    return run([*bench_python(), HERE / "benchmarking/reference.py", "--kernel", kernel_dir(args.kernel)])
 
 
 def cmd_kernels(args, extra) -> int:
@@ -203,7 +202,7 @@ def cmd_kernels(args, extra) -> int:
     kernels = paths().list_kernels()
     for k in kernels:
         mark = "*" if k == kernels[-1] else " "
-        print(f"{mark} {k.name:45s} {manifest(k).get('description', '')}")
+        print(f"{mark} {k.name:45s} {paths().load_manifest(k).get('description', '')}")
     print("\n* = default (newest). Select another with --kernel <substring>.")
     return 0
 
